@@ -8,6 +8,7 @@ import (
 	"time"
 	"github.com/go-ini/ini"
 	"strconv"
+	"log"
 )
 
 // Get bytes
@@ -103,8 +104,10 @@ func main() {
 	for {
 		select {
 		case <-c.SyncDone:
+			log.Println("sync")
 			go c.Sync()
 		case <-c.CacheDone:
+			log.Println("cache")
 			go c.Cache()
 		case <-time.After(2 * time.Second):
 		}

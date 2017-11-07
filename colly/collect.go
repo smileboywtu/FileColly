@@ -157,6 +157,7 @@ func (f *FileItem) Runner() {
 		return
 	}
 	f.Backend.CacheFileContent(packBytes)
+	log.Println("send file: ", f.Name)
 
 	// Delete file after cache
 	os.Remove(f.Name)
