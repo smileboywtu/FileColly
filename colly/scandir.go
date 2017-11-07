@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"path"
 	"strings"
+	"os"
 )
 
 // Traverse all the files inside a directory
@@ -19,15 +20,17 @@ type DirScanner struct {
 	DirPath    string   `directory to scan`
 	folders    []string `internal exchange list holder`
 	BufferSize int      `channel buffer size`
+	LimitSize  int64
 }
 
 // Create new Scanner
-func NewDirScanner(path string, buffer_size int) *DirScanner {
+func NewDirScanner(path string, bufferSize int, limitSize int64) *DirScanner {
 
 	scaninst := &DirScanner{
 		DirPath:    path,
 		folders:    make([]string, 0, 50),
-		BufferSize: buffer_size,
+		BufferSize: bufferSize,
+		LimitSize:  limitSize,
 	}
 
 	// add path to folder
@@ -62,6 +65,14 @@ func (s *DirScanner) Scandir() []string {
 				if len(buffer) >= s.BufferSize {
 					return buffer
 				} else {
+					var file = path.Join(_dir, entry.Name())
+					info, err := os.Stat(file)
+					if err != nil {
+						continue
+					}
+					if info.Size() > s.LimitSize {
+						continue
+					}
 					buffer = append(buffer, path.Join(_dir, entry.Name()))
 				}
 			}

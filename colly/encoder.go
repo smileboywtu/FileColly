@@ -19,14 +19,12 @@ func (c *FileEncoder) Encode() (string, error) {
 	var buf bytes.Buffer
 	// level same to python default
 	writer, err := zlib.NewWriterLevel(&buf, 6)
-	defer func() {
-		writer.Close()
-	}()
 
 	if err != nil {
 		return "", err
 	}
 	writer.Write(c.FileContent)
+	writer.Close()
 
 	b64path := base64.StdEncoding.EncodeToString([]byte(c.FilePath))
 

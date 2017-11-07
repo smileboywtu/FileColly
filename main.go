@@ -9,10 +9,6 @@ import (
 	"github.com/go-ini/ini"
 	"strconv"
 )
-import (
-	_ "net/http/pprof"
-	"net/http"
-)
 
 // Get bytes
 func getBytes(size string) int64 {
@@ -87,22 +83,17 @@ func parseConfig(file string) *colly.Collector {
 		fmt.Fprintf(os.Stderr, "redis connect error")
 		os.Exit(-1)
 	}
-	BUFFERSIZE := 500
-	scanner := colly.NewDirScanner(collyDir, BUFFERSIZE)
+	BUFFERSIZE := 5000
+	scanner := colly.NewDirScanner(collyDir, BUFFERSIZE, getBytes(maxFileSize))
 	return colly.NewCollector(
 		backend,
 		scanner,
-		2*time.Second,
-		1*time.Second,
-		getBytes(bufferLimitSize),
-		getBytes(maxFileSize))
+		5*time.Second,
+		1*time.Millisecond,
+		getBytes(bufferLimitSize))
 }
 
 func main() {
-
-	go func() {
-		http.ListenAndServe("localhost:6060", nil)
-	}()
 
 	c := parseConfig("config.ini")
 
@@ -110,14 +101,14 @@ func main() {
 	go c.Cache()
 
 	for {
-
 		select {
 		case <-c.SyncDone:
 			go c.Sync()
 		case <-c.CacheDone:
 			go c.Cache()
 		case <-time.After(2 * time.Second):
-			break
 		}
 	}
+
+	c.ShutDown()
 }

@@ -12,9 +12,11 @@ import (
 type CacheWriter interface {
 	GetCacheQueueSize() int64
 	CacheFileEntry(files []string) error
+	RemoveCacheEntry(files []string) error
 	GetCacheEntry() ([]string, error)
 	CacheFileContent(buffer string) error
 	BatchCacheFileContent(buffers []string) error
+	IsAllow() bool
 }
 
 /**
@@ -103,6 +105,21 @@ func (w *RedisWriter) GetCacheEntry() ([]string, error) {
 	}
 
 	return results, nil
+}
+
+// Remove cache entry from redis
+func (w *RedisWriter) RemoveCacheEntry(files []string) error {
+	// check redis
+	if !w.Check() {
+		return &WriterError{param: "files ...", prob: "redis connection test fail"}
+	}
+
+	args := []interface{}{}
+	for _, m := range files {
+		args = append(args, m)
+	}
+	err := w.RClient.SRem(w.ExQName, args...).Err()
+	return err
 }
 
 //Generic Writer

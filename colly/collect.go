@@ -37,8 +37,8 @@ type Collector struct {
 	// Buffer
 	BufferCacheLimit int64
 
-	// Max File Size
-	MaxFileSize int64
+	// pool worker
+	pool *Pool
 
 	// FILTERS
 	filtercallbacks []FilterCallback
@@ -71,8 +71,7 @@ func NewCollector(
 	scanner *DirScanner,
 	syncDelay time.Duration,
 	cacheDelay time.Duration,
-	bufferLimit int64,
-	maxFileSize int64) *Collector {
+	bufferLimit int64) *Collector {
 
 	return &Collector{
 		Backend:          backend,
@@ -82,7 +81,7 @@ func NewCollector(
 		SyncDone:         make(chan bool, 1),
 		CacheDone:        make(chan bool, 1),
 		BufferCacheLimit: bufferLimit,
-		MaxFileSize:      maxFileSize,
+		pool:             NewWorkPool(10),
 		filtercallbacks:  make([]FilterCallback, 0, 8),
 	}
 }
@@ -137,6 +136,32 @@ func (c *Collector) GetMatch(filepath string) bool {
 	return true
 }
 
+type FileItem struct {
+	Name string
+	*Collector
+}
+
+func (f *FileItem) Runner() {
+	content, err := ioutil.ReadFile(f.Name)
+	if err != nil {
+		os.Remove(f.Name)
+		return
+	}
+	index := f.Scanner.TrimRootDirectoryPath(f.Name)
+	encoder := &FileEncoder{
+		FilePath:    index,
+		FileContent: content,
+	}
+	packBytes, err := encoder.Encode()
+	if err != nil {
+		return
+	}
+	f.Backend.CacheFileContent(packBytes)
+
+	// Delete file after cache
+	os.Remove(f.Name)
+}
+
 // Cache file into redis
 func (c *Collector) Cache() error {
 
@@ -150,61 +175,47 @@ func (c *Collector) Cache() error {
 		return &CollectorError{prob: "Get Cache Entry failed"}
 	}
 
-	var buffer []string
+	var buffer = make([]string, 0, 100)
 	var bufferLimit int64 = c.BufferCacheLimit
-
 	var wg = &sync.WaitGroup{}
-	var wl = &sync.RWMutex{}
-	parallel := make(chan bool, 50)
+	var toRemove []string
+
 	for _, file := range files {
+		if !c.Backend.IsAllow() {
+			break
+		}
+
+		toRemove = append(toRemove, file)
 		if !c.GetMatch(file) {
 			continue
 		}
 		if fileInfo, err := os.Stat(file); os.IsNotExist(err) {
 			logger.Println(err)
 			continue
-		} else if fileInfo.Size() >= c.MaxFileSize {
-			continue
 		} else if bufferLimit -= fileInfo.Size(); bufferLimit <= 0 {
 			break
 		}
 
 		wg.Add(1)
-		parallel <- true
-		go func(filePath string) {
-
-			defer func() {
-				<-parallel
-				wg.Done()
-			}()
-
-			content, err := ioutil.ReadFile(file)
-			if err != nil {
-				os.Remove(file)
-				return
-			}
-			index := c.Scanner.TrimRootDirectoryPath(file)
-			encoder := &FileEncoder{
-				FilePath:    index,
-				FileContent: content,
-			}
-			packBytes, err := encoder.Encode()
-			if err != nil {
-				return
-			}
-
-			wl.Lock()
-			buffer = append(buffer, packBytes)
-			wl.Unlock()
-
-			// Delete file after cache
-			os.Remove(file)
-
-		}(file)
+		go func() {
+			c.pool.Run(&FileItem{
+				Name:      file,
+				Collector: c,
+			})
+			wg.Done()
+		}()
 	}
+
+	// delete from redis
+	c.Backend.RemoveCacheEntry(toRemove)
 	wg.Wait()
+
 	// bulk cache file
 	c.Backend.BatchCacheFileContent(buffer)
-
 	return nil
+}
+
+// Shutdown pool
+func (c *Collector) ShutDown() {
+	c.pool.ShutDown()
 }
