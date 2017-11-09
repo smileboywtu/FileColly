@@ -2,11 +2,11 @@ package colly
 
 import (
 	"fmt"
-	"time"
 	"sync"
 	"os"
 	"log"
 	"io/ioutil"
+	"github.com/pkg/errors"
 )
 
 // Log
@@ -15,35 +15,30 @@ var logger *log.Logger
 // Filter callback design
 type FilterCallback func(filepath string) bool
 
+type EncodeResult struct {
+	Path          string
+	EncodeContent string
+	Err           error
+}
+
 type Collector struct {
+	sync.RWMutex
+
+	// Root
 	// BACKEND exchange and send file
 	Backend CacheWriter
 
 	// DIRECTORY scanner
-	Scanner *DirScanner
+	Walker *FileWalker
 
-	// CHECK if sync done
-	SyncDone chan bool
-
-	// CHECK if cache done
-	CacheDone chan bool
-
-	// SYNC wait delay
-	SyncDelay time.Duration
-
-	//CACHE wait delay
-	CacheDelay time.Duration
-
-	// Buffer
-	BufferCacheLimit int64
-
-	// pool worker
-	pool *Pool
+	// File limit size
+	SingleLimitSize int64
 
 	// FILTERS
 	filtercallbacks []FilterCallback
 
-	lock *sync.Mutex
+	// Cancellation
+	done chan struct{}
 }
 
 // Error handler
@@ -66,35 +61,21 @@ func InitLogger(logFile string) {
 }
 
 // Collector
-func NewCollector(
-	backend CacheWriter,
-	scanner *DirScanner,
-	syncDelay time.Duration,
-	cacheDelay time.Duration,
-	bufferLimit int64) *Collector {
-
-	return &Collector{
-		Backend:          backend,
-		Scanner:          scanner,
-		SyncDelay:        syncDelay,
-		CacheDelay:       cacheDelay,
-		SyncDone:         make(chan bool, 1),
-		CacheDone:        make(chan bool, 1),
-		BufferCacheLimit: bufferLimit,
-		pool:             NewWorkPool(10),
-		filtercallbacks:  make([]FilterCallback, 0, 8),
+func NewCollector(root string, limitSize int64, backend CacheWriter) *Collector {
+	c := Collector{
+		Backend:         backend,
+		filtercallbacks: make([]FilterCallback, 0, 8),
+		done:            make(chan struct{}),
 	}
-}
-
-// List all scanned files
-func (c *Collector) ListScannedFiles() []string {
-	return c.Scanner.Scandir()
+	c.Walker = NewWalker(root, limitSize, 30, c.done)
+	return &c
 }
 
 //	Add filter callbacks
 func (c *Collector) OnFilter(callback FilterCallback) {
-	c.lock.Lock()
-
+	c.Lock()
+	c.filtercallbacks = append(c.filtercallbacks, callback)
+	c.Unlock()
 }
 
 //	List Cached file
@@ -106,21 +87,91 @@ func (c *Collector) ListCacheFiles() []string {
 	}
 }
 
-// Cache file content to redis
-func (c *Collector) Sync() error {
+// Send wait
+func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
+	select {
+	case result <- item:
+	case <-c.done:
+		return
+	}
+}
 
-	defer func() {
-		time.Sleep(c.SyncDelay)
-		c.SyncDone <- true
+// Read file and encode
+func (c *Collector) EncodingFile(fileItems <-chan FileItem, result chan<- EncodeResult) {
+
+	for item := range fileItems {
+
+		// check if need to deal
+		if !c.GetMatch(item.FilePath) {
+			c.SendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
+		}
+
+		data, err := ioutil.ReadFile(item.FilePath)
+		if err != nil {
+			c.SendPoll(result, EncodeResult{item.FilePath, "", err})
+		}
+
+		encoder := &FileEncoder{
+			FilePath:    item.FileIndex,
+			FileContent: data,
+		}
+		packBytes, err := encoder.Encode()
+		c.SendPoll(result, EncodeResult{item.FilePath, packBytes, err})
+	}
+
+}
+
+// Collector sync to redis
+func (c *Collector) Sync() {
+
+	var wg sync.WaitGroup
+	result := make(chan EncodeResult)
+
+	// walk file
+	fileItems, errc := c.Walker.Walk()
+
+	// add wait group
+	wg.Add(50)
+	for i := 0; i < 50; i++ {
+		go func() {
+			c.EncodingFile(fileItems, result)
+			wg.Done()
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(result)
 	}()
 
-	// scan files
-	c.Scanner.ClearCache()
-	buffer := c.Scanner.Scandir()
+	c.Cache(result)
 
-	// write to backend
-	return c.Backend.CacheFileEntry(buffer)
+	if err := <-errc; err != nil {
+		fmt.Println(err.Error())
+		logger.Println(err.Error())
+	}
 
+}
+
+// Cache pool
+func (c *Collector) Cache(results <-chan EncodeResult) {
+
+	var maxWorker = 500
+	var wg sync.WaitGroup
+	wg.Add(maxWorker)
+
+	for i := 0; i < maxWorker; i++ {
+		go func() {
+			for r := range results {
+				if r.Err == nil {
+					c.Backend.CacheFileContent(r.EncodeContent)
+				}
+				os.Remove(r.Path)
+			}
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
 }
 
 // Use filter callback to filter files
@@ -136,87 +187,7 @@ func (c *Collector) GetMatch(filepath string) bool {
 	return true
 }
 
-type FileItem struct {
-	Name string
-	*Collector
-}
-
-func (f *FileItem) Runner() {
-	content, err := ioutil.ReadFile(f.Name)
-	if err != nil {
-		os.Remove(f.Name)
-		return
-	}
-	index := f.Scanner.TrimRootDirectoryPath(f.Name)
-	encoder := &FileEncoder{
-		FilePath:    index,
-		FileContent: content,
-	}
-	packBytes, err := encoder.Encode()
-	if err != nil {
-		return
-	}
-	f.Backend.CacheFileContent(packBytes)
-	log.Println("send file: ", f.Name)
-
-	// Delete file after cache
-	os.Remove(f.Name)
-}
-
-// Cache file into redis
-func (c *Collector) Cache() error {
-
-	defer func() {
-		time.Sleep(c.CacheDelay)
-		c.CacheDone <- true
-	}()
-
-	files, err := c.Backend.GetCacheEntry()
-	if err != nil {
-		return &CollectorError{prob: "Get Cache Entry failed"}
-	}
-
-	var buffer = make([]string, 0, 100)
-	var bufferLimit int64 = c.BufferCacheLimit
-	var wg = &sync.WaitGroup{}
-	var toRemove []string
-
-	for _, file := range files {
-		if !c.Backend.IsAllow() {
-			break
-		}
-
-		toRemove = append(toRemove, file)
-		if !c.GetMatch(file) {
-			continue
-		}
-		if fileInfo, err := os.Stat(file); os.IsNotExist(err) {
-			logger.Println(err)
-			continue
-		} else if bufferLimit -= fileInfo.Size(); bufferLimit <= 0 {
-			break
-		}
-
-		wg.Add(1)
-		go func() {
-			c.pool.Run(&FileItem{
-				Name:      file,
-				Collector: c,
-			})
-			wg.Done()
-		}()
-	}
-
-	// delete from redis
-	c.Backend.RemoveCacheEntry(toRemove)
-	wg.Wait()
-
-	// bulk cache file
-	c.Backend.BatchCacheFileContent(buffer)
-	return nil
-}
-
-// Shutdown pool
+// cancellation
 func (c *Collector) ShutDown() {
-	c.pool.ShutDown()
+	close(c.done)
 }

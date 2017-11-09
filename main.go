@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"github.com/smileboywtu/FileCollector/colly"
 	"os"
-	"time"
 	"github.com/go-ini/ini"
 	"strconv"
-	"log"
+	"time"
 )
 
 // Get bytes
@@ -73,7 +72,6 @@ func parseConfig(file string) *colly.Collector {
 	collyDir := appconf.Section("collector").Key("collect_dir").String()
 	sendQName := appconf.Section("collector").Key("send_queue_name").String()
 	cacheQName := appconf.Section("collector").Key("cache_queue_name").String()
-	bufferLimitSize := appconf.Section("collector").Key("max_cache_size").String()
 	maxFileSize := appconf.Section("collector").Key("max_file_size").String()
 	queueLimitSize, err := appconf.Section("collector").Key("max_cache_file").Int()
 	if err != nil {
@@ -84,34 +82,17 @@ func parseConfig(file string) *colly.Collector {
 		fmt.Fprintf(os.Stderr, "redis connect error")
 		os.Exit(-1)
 	}
-	BUFFERSIZE := 5000
-	scanner := colly.NewDirScanner(collyDir, BUFFERSIZE, getBytes(maxFileSize))
-	return colly.NewCollector(
-		backend,
-		scanner,
-		5*time.Second,
-		1*time.Millisecond,
-		getBytes(bufferLimitSize))
+	return colly.NewCollector(collyDir, getBytes(maxFileSize), backend)
+
 }
 
 func main() {
 
 	c := parseConfig("config.ini")
 
-	go c.Sync()
-	go c.Cache()
-
 	for {
-		select {
-		case <-c.SyncDone:
-			log.Println("sync")
-			go c.Sync()
-		case <-c.CacheDone:
-			log.Println("cache")
-			go c.Cache()
-		case <-time.After(2 * time.Second):
-		}
+		c.Sync()
+		time.Sleep(1 * time.Millisecond)
 	}
 
-	c.ShutDown()
 }
