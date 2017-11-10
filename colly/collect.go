@@ -40,6 +40,9 @@ type Collector struct {
 	// parallel file sender
 	ParallelSenders int
 
+	// Reserve file when queue is full
+	ReserveFlag bool
+
 	// FILTERS
 	filtercallbacks []FilterCallback
 
@@ -72,12 +75,14 @@ func NewCollector(
 	limitSize int64,
 	backend CacheWriter,
 	readerNumber int,
-	senderNumber int) *Collector {
+	senderNumber int,
+	reserveFlag bool) *Collector {
 	c := Collector{
 		Backend:         backend,
 		filtercallbacks: make([]FilterCallback, 0, 8),
 		ParallelReaders: readerNumber,
 		ParallelSenders: senderNumber,
+		ReserveFlag:     reserveFlag,
 		done:            make(chan struct{}),
 	}
 	c.Walker = NewWalker(root, limitSize, 50, c.done)
@@ -174,6 +179,9 @@ func (c *Collector) Cache(results <-chan EncodeResult) {
 	for i := 0; i < c.ParallelSenders; i++ {
 		go func() {
 			for r := range results {
+				if false == c.Backend.IsAllow() && true == c.ReserveFlag {
+					continue
+				}
 				if r.Err == nil {
 					c.Backend.CacheFileContent(r.EncodeContent)
 				}

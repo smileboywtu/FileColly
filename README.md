@@ -30,6 +30,3 @@ dep ensure
 ``` shell
 go build -ldflags "-w -s" main.go
 ```
-
-
-  

@@ -86,6 +86,10 @@ func parseConfig(file string) *colly.Collector {
 	if err != nil {
 		panic(errors.New("max_cache_file must be integer"))
 	}
+	reserveFile, err := appconf.Section("collector").Key("reserve_file").Bool()
+	if err != nil {
+		panic(errors.New("reserve_file must be bool type"))
+	}
 	backend, err := colly.NewRedisWriter(opts, cacheQName, sendQName, queueLimitSize)
 	if backend == nil || err != nil {
 		fmt.Fprintf(os.Stderr, "redis connect error")
@@ -96,7 +100,8 @@ func parseConfig(file string) *colly.Collector {
 		getBytes(maxFileSize),
 		backend,
 		readerNumber,
-		senderNumber)
+		senderNumber,
+		reserveFile)
 
 }
 
