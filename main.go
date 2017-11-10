@@ -8,6 +8,7 @@ import (
 	"github.com/go-ini/ini"
 	"strconv"
 	"time"
+	"github.com/pkg/errors"
 )
 
 // Get bytes
@@ -73,16 +74,29 @@ func parseConfig(file string) *colly.Collector {
 	sendQName := appconf.Section("collector").Key("send_queue_name").String()
 	cacheQName := appconf.Section("collector").Key("cache_queue_name").String()
 	maxFileSize := appconf.Section("collector").Key("max_file_size").String()
+	readerNumber, err := appconf.Section("collector").Key("max_reader_workers").Int()
+	if err != nil {
+		panic(errors.New("max_reader_workers must be integer"))
+	}
+	senderNumber, err := appconf.Section("collector").Key("max_sender_workers").Int()
+	if err != nil {
+		panic(errors.New("max_sender_workers must be integer"))
+	}
 	queueLimitSize, err := appconf.Section("collector").Key("max_cache_file").Int()
 	if err != nil {
-		panic(err)
+		panic(errors.New("max_cache_file must be integer"))
 	}
 	backend, err := colly.NewRedisWriter(opts, cacheQName, sendQName, queueLimitSize)
 	if backend == nil || err != nil {
 		fmt.Fprintf(os.Stderr, "redis connect error")
 		os.Exit(-1)
 	}
-	return colly.NewCollector(collyDir, getBytes(maxFileSize), backend)
+	return colly.NewCollector(
+		collyDir,
+		getBytes(maxFileSize),
+		backend,
+		readerNumber,
+		senderNumber)
 
 }
 

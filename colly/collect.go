@@ -34,6 +34,12 @@ type Collector struct {
 	// File limit size
 	SingleLimitSize int64
 
+	// parallel file reader
+	ParallelReaders int
+
+	// parallel file sender
+	ParallelSenders int
+
 	// FILTERS
 	filtercallbacks []FilterCallback
 
@@ -61,13 +67,20 @@ func InitLogger(logFile string) {
 }
 
 // Collector
-func NewCollector(root string, limitSize int64, backend CacheWriter) *Collector {
+func NewCollector(
+	root string,
+	limitSize int64,
+	backend CacheWriter,
+	readerNumber int,
+	senderNumber int) *Collector {
 	c := Collector{
 		Backend:         backend,
 		filtercallbacks: make([]FilterCallback, 0, 8),
+		ParallelReaders: readerNumber,
+		ParallelSenders: senderNumber,
 		done:            make(chan struct{}),
 	}
-	c.Walker = NewWalker(root, limitSize, 30, c.done)
+	c.Walker = NewWalker(root, limitSize, 50, c.done)
 	return &c
 }
 
@@ -131,8 +144,8 @@ func (c *Collector) Sync() {
 	fileItems, errc := c.Walker.Walk()
 
 	// add wait group
-	wg.Add(50)
-	for i := 0; i < 50; i++ {
+	wg.Add(c.ParallelReaders)
+	for i := 0; i < c.ParallelReaders; i++ {
 		go func() {
 			c.EncodingFile(fileItems, result)
 			wg.Done()
@@ -155,11 +168,10 @@ func (c *Collector) Sync() {
 // Cache pool
 func (c *Collector) Cache(results <-chan EncodeResult) {
 
-	var maxWorker = 500
 	var wg sync.WaitGroup
-	wg.Add(maxWorker)
+	wg.Add(c.ParallelSenders)
 
-	for i := 0; i < maxWorker; i++ {
+	for i := 0; i < c.ParallelSenders; i++ {
 		go func() {
 			for r := range results {
 				if r.Err == nil {
