@@ -8,6 +8,7 @@ import (
 	"github.com/go-ini/ini"
 	"strconv"
 	"time"
+	"flag"
 	"github.com/pkg/errors"
 )
 
@@ -107,7 +108,11 @@ func parseConfig(file string) *colly.Collector {
 
 func main() {
 
-	c := parseConfig("config.ini")
+	configFile := flag.String("c", "config.ini", "file collector config file path")
+
+	flag.Parse()
+
+	c := parseConfig(*configFile)
 
 	for {
 		c.Sync()
