@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"github.com/pkg/errors"
+	"context"
 )
 
 type FileItem struct {
@@ -27,15 +28,15 @@ type FileWalker struct {
 	MaxWalkerSize int
 
 	// done
-	Done <-chan struct{}
+	Ctx context.Context
 }
 
-func NewWalker(root string, limitSize int64, workers int, done <-chan struct{}) *FileWalker {
+func NewWalker(root string, limitSize int64, workers int, ctx context.Context) *FileWalker {
 	return &FileWalker{
 		Root:          root,
 		FileLimitSize: limitSize,
 		MaxWalkerSize: workers,
-		Done:          done,
+		Ctx:           ctx,
 	}
 }
 
@@ -67,7 +68,7 @@ func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
 				FileIndex: w.TrimRootDirectoryPath(path),
 				FileSize:  info.Size(),
 			}:
-			case <-w.Done:
+			case <-w.Ctx.Done():
 				return errors.New("walk canceled")
 			}
 

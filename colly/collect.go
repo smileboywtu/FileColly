@@ -7,6 +7,7 @@ import (
 	"log"
 	"io/ioutil"
 	"github.com/pkg/errors"
+	"context"
 )
 
 // Log
@@ -47,7 +48,8 @@ type Collector struct {
 	filtercallbacks []FilterCallback
 
 	// Cancellation
-	done chan struct{}
+	ctx        context.Context
+	cancleFunc context.CancelFunc
 }
 
 // Error handler
@@ -77,15 +79,19 @@ func NewCollector(
 	readerNumber int,
 	senderNumber int,
 	reserveFlag bool) *Collector {
+
+	ctx, cancle := context.WithCancel(context.Background())
 	c := Collector{
 		Backend:         backend,
 		filtercallbacks: make([]FilterCallback, 0, 8),
 		ParallelReaders: readerNumber,
 		ParallelSenders: senderNumber,
 		ReserveFlag:     reserveFlag,
-		done:            make(chan struct{}),
+		ctx:             ctx,
+		cancleFunc:      cancle,
 	}
-	c.Walker = NewWalker(root, limitSize, 50, c.done)
+	c.Walker = NewWalker(root, limitSize, 50, ctx)
+
 	return &c
 }
 
@@ -109,7 +115,7 @@ func (c *Collector) ListCacheFiles() []string {
 func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
 	select {
 	case result <- item:
-	case <-c.done:
+	case <-c.ctx.Done():
 		return
 	}
 }
@@ -209,5 +215,5 @@ func (c *Collector) GetMatch(filepath string) bool {
 
 // cancellation
 func (c *Collector) ShutDown() {
-	close(c.done)
+	c.cancleFunc()
 }
