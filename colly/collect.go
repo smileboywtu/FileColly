@@ -10,10 +10,8 @@ import (
 	"context"
 )
 
-// Log
 var logger *log.Logger
 
-// Filter callback design
 type FilterCallback func(filepath string) bool
 
 type EncodeResult struct {
@@ -24,35 +22,17 @@ type EncodeResult struct {
 
 type Collector struct {
 	sync.RWMutex
-
-	// Root
-	// BACKEND exchange and send file
-	Backend CacheWriter
-
-	// DIRECTORY scanner
-	Walker *FileWalker
-
-	// File limit size
+	Backend         CacheWriter
+	Walker          *FileWalker
 	SingleLimitSize int64
-
-	// parallel file reader
 	ParallelReaders int
-
-	// parallel file sender
 	ParallelSenders int
-
-	// Reserve file when queue is full
-	ReserveFlag bool
-
-	// FILTERS
+	ReserveFlag     bool
 	filtercallbacks []FilterCallback
-
-	// Cancellation
-	ctx        context.Context
-	cancleFunc context.CancelFunc
+	ctx             context.Context
+	cancleFunc      context.CancelFunc
 }
 
-// Error handler
 type CollectorError struct {
 	prob string
 }
@@ -61,7 +41,6 @@ func (e *CollectorError) Error() string {
 	return fmt.Sprintf("%s", e.prob)
 }
 
-// Init collector log
 func InitLogger(logFile string) {
 
 	fd, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
@@ -71,7 +50,6 @@ func InitLogger(logFile string) {
 	logger = log.New(fd, "collector: ", log.Lshortfile)
 }
 
-// Collector
 func NewCollector(
 	root string,
 	limitSize int64,
@@ -95,14 +73,12 @@ func NewCollector(
 	return &c
 }
 
-//	Add filter callbacks
 func (c *Collector) OnFilter(callback FilterCallback) {
 	c.Lock()
 	c.filtercallbacks = append(c.filtercallbacks, callback)
 	c.Unlock()
 }
 
-//	List Cached file
 func (c *Collector) ListCacheFiles() []string {
 	if result, err := c.Backend.GetCacheEntry(); err != nil {
 		return nil
@@ -111,7 +87,6 @@ func (c *Collector) ListCacheFiles() []string {
 	}
 }
 
-// Send wait
 func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
 	select {
 	case result <- item:
@@ -120,12 +95,10 @@ func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
 	}
 }
 
-// Read file and encode
 func (c *Collector) EncodingFile(fileItems <-chan FileItem, result chan<- EncodeResult) {
 
 	for item := range fileItems {
 
-		// check if need to deal
 		if !c.GetMatch(item.FilePath) {
 			c.SendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
 		}
@@ -134,27 +107,24 @@ func (c *Collector) EncodingFile(fileItems <-chan FileItem, result chan<- Encode
 		if err != nil {
 			c.SendPoll(result, EncodeResult{item.FilePath, "", err})
 		}
-
 		encoder := &FileEncoder{
 			FilePath:    item.FileIndex,
-			FileContent: data,
+			FileContent: make([]byte, len(data)),
 		}
+		copy(encoder.FileContent, data)
 		packBytes, err := encoder.Encode()
 		c.SendPoll(result, EncodeResult{item.FilePath, packBytes, err})
 	}
 
 }
 
-// Collector sync to redis
 func (c *Collector) Sync() {
 
 	var wg sync.WaitGroup
 	result := make(chan EncodeResult)
 
-	// walk file
 	fileItems, errc := c.Walker.Walk()
 
-	// add wait group
 	wg.Add(c.ParallelReaders)
 	for i := 0; i < c.ParallelReaders; i++ {
 		go func() {
@@ -176,7 +146,6 @@ func (c *Collector) Sync() {
 
 }
 
-// Cache pool
 func (c *Collector) Cache(results <-chan EncodeResult) {
 
 	var wg sync.WaitGroup
@@ -200,11 +169,9 @@ func (c *Collector) Cache(results <-chan EncodeResult) {
 	wg.Wait()
 }
 
-// Use filter callback to filter files
 func (c *Collector) GetMatch(filepath string) bool {
 	if len(c.filtercallbacks) > 0 {
 		for _, filter := range c.filtercallbacks {
-			// do not done for this file
 			if !filter(filepath) {
 				return false
 			}
@@ -213,7 +180,6 @@ func (c *Collector) GetMatch(filepath string) bool {
 	return true
 }
 
-// cancellation
 func (c *Collector) ShutDown() {
 	c.cancleFunc()
 }

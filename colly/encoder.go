@@ -13,11 +13,9 @@ type FileEncoder struct {
 	FileContent []byte
 }
 
-// Encode files use zlib and msgpack lib tool
 func (c *FileEncoder) Encode() (string, error) {
 
 	var buf bytes.Buffer
-	// level same to python default
 	writer, err := zlib.NewWriterLevel(&buf, 6)
 
 	if err != nil {
@@ -28,7 +26,6 @@ func (c *FileEncoder) Encode() (string, error) {
 
 	b64path := base64.StdEncoding.EncodeToString([]byte(c.FilePath))
 
-	// file context
 	ctx := map[string]string{}
 	ctx["path"] = b64path
 	ctx["content"] = buf.String()

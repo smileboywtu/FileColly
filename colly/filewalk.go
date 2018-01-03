@@ -18,17 +18,10 @@ type FileItem struct {
 }
 
 type FileWalker struct {
-	// Root path
-	Root string
-
-	// File Limit Size
+	Root          string
 	FileLimitSize int64
-
-	// Max walk goroutine size
 	MaxWalkerSize int
-
-	// done
-	Ctx context.Context
+	Ctx           context.Context
 }
 
 func NewWalker(root string, limitSize int64, workers int, ctx context.Context) *FileWalker {
@@ -46,7 +39,6 @@ func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
 	errc := make(chan error, 1)
 
 	go func() {
-		// close out chan
 		defer close(files)
 
 		errc <- filepath.Walk(dirName, func(path string, info os.FileInfo, err error) error {
@@ -79,13 +71,10 @@ func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
 	return files, errc
 }
 
-// Main walk function
 func (w *FileWalker) Walk() (<-chan FileItem, <-chan error) {
-	// start from root
 	return w.WalkDir(w.Root)
 }
 
-// Trim root directory path
 func (w *FileWalker) TrimRootDirectoryPath(path string) string {
 	return strings.TrimPrefix(path, w.Root)
 }
