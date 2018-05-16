@@ -6,7 +6,7 @@ import (
 	"bufio"
 	"strings"
 	"github.com/go-redis/redis"
-	"github.com/smileboywtu/FileCollector/common"
+	"github.com/smileboywtu/FileColly/common"
 )
 
 type CacheWriter interface {

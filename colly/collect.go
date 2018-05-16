@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
-	"github.com/smileboywtu/FileCollector/common"
+	"github.com/smileboywtu/FileColly/common"
 )
 
 var logger *log.Logger

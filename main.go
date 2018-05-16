@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"github.com/urfave/cli"
 	"github.com/yudai/gotty/pkg/homedir"
-	"github.com/smileboywtu/FileCollector/common"
-	collector "github.com/smileboywtu/FileCollector/colly"
+	"github.com/smileboywtu/FileColly/common"
+	collector "github.com/smileboywtu/FileColly/colly"
 )
 
 var email string
