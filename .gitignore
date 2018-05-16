@@ -2,6 +2,8 @@
 sender.log
 main
 filecolly
+help
+dumpdb.txt
 
 # Binaries for programs and plugins
 *.exe
