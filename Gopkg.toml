@@ -22,17 +22,37 @@
 
 
 [[constraint]]
-  name = "github.com/go-ini/ini"
-  version = "1.30.3"
+  name = "github.com/fatih/structs"
+  version = "1.0.0"
 
 [[constraint]]
   name = "github.com/go-redis/redis"
-  version = "6.7.3"
+  version = "6.10.2"
+
+[[constraint]]
+  name = "github.com/pkg/errors"
+  version = "0.8.0"
+
+[[constraint]]
+  name = "github.com/urfave/cli"
+  version = "1.20.0"
 
 [[constraint]]
   name = "github.com/vmihailenco/msgpack"
-  version = "3.2.0"
+  version = "2.0.0"
 
 [[constraint]]
-  name = "github.com/natefinch/lumberjack"
-  version = "2.0.0"
+  name = "github.com/yudai/gotty"
+  version = "2.0.0-alpha.3"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/yudai/hcl"
+
+[[constraint]]
+  name = "gopkg.in/natefinch/lumberjack.v2"
+  version = "2.1.0"
+
+[[constraint]]
+  name = "gopkg.in/yaml.v2"
+  version = "2.2.1"
