@@ -1,6 +1,10 @@
 package colly
 
 import (
+	"os"
+	"fmt"
+	"bufio"
+	"strings"
 	"github.com/go-redis/redis"
 	"github.com/smileboywtu/FileCollector/common"
 )
@@ -18,10 +22,11 @@ type CacheWriter interface {
 }
 
 type RedisWriter struct {
-	RClient        *redis.Client
-	CacheQueueName string
-	DestQueueName  string
-	QueueSizeLimit int
+	RClient         *redis.Client
+	CacheQueueName  string
+	DestQueueName   string
+	BackendDumpFile string `dump cache entries into file`
+	QueueSizeLimit  int
 }
 
 // NewRedisWriter init a new backend for cache and exchange
@@ -34,10 +39,11 @@ func NewRedisWriter(opts *redis.Options, cacheQName string, destQName string, qL
 	}
 
 	return &RedisWriter{
-		RClient:        client,
-		CacheQueueName: cacheQName,
-		DestQueueName:  destQName,
-		QueueSizeLimit: qLimit,
+		RClient:         client,
+		CacheQueueName:  cacheQName,
+		DestQueueName:   destQName,
+		BackendDumpFile: "dumpdb.txt",
+		QueueSizeLimit:  qLimit,
 	}, nil
 }
 
@@ -50,17 +56,19 @@ func (w *RedisWriter) GetDestQueueSize() int64 {
 	return clen
 }
 
-func (w *RedisWriter) CacheFileEntry(files []string) error {
+// CacheFileCheck checks if file path has cache in memory map
+// if just return cache timestamp if not just return empty
+func (w *RedisWriter) CacheFileCheck(filepath string) (string, error) {
+	return w.RClient.HGet(w.CacheQueueName, filepath).Result()
+}
+
+func (w *RedisWriter) CacheFileEntry(filepath string, timestamp string) error {
 
 	if !w.Check() {
 		return &common.WriterError{Params: "files ...", Prob: "redis connection test fail"}
 	}
 
-	args := []interface{}{}
-	for _, m := range files {
-		args = append(args, m)
-	}
-	err := w.RClient.SAdd(w.CacheQueueName, args...).Err()
+	err := w.RClient.HSet(w.CacheQueueName, filepath, timestamp).Err()
 	return err
 }
 
@@ -78,17 +86,59 @@ func (w *RedisWriter) GetCacheEntry() ([]string, error) {
 }
 
 // RemoveCacheEntry delete cache file in records
-func (w *RedisWriter) RemoveCacheEntry(files []string) error {
+func (w *RedisWriter) RemoveCacheEntry(filepath string) error {
 	if !w.Check() {
 		return &common.WriterError{Params: "files ...", Prob: "redis connection test fail"}
 	}
 
-	args := []interface{}{}
-	for _, m := range files {
-		args = append(args, m)
-	}
-	err := w.RClient.SRem(w.CacheQueueName, args...).Err()
+	err := w.RClient.HDel(w.CacheQueueName, filepath).Err()
 	return err
+}
+
+// DumpEntry2File dumps cache entries in hashmap to a file
+func (w *RedisWriter) DumpEntry2File() error {
+	results, errs := w.GetCacheEntry()
+	if errs != nil {
+		return errs
+	}
+
+	fd, errs := os.OpenFile(w.BackendDumpFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if errs != nil {
+		return errs
+	}
+	defer fd.Close()
+
+	for i := 0; i < len(results); i = i + 2 {
+		fd.WriteString(fmt.Sprintf("%s %s\n", results[i], results[i+1]))
+	}
+
+	return nil
+}
+
+// LoadEntryFromDB load local cache db to backend
+func (w *RedisWriter) LoadEntryFromDB() error {
+
+	fd, errs := os.Open(w.BackendDumpFile)
+	if errs != nil {
+		return errs
+	}
+	defer fd.Close()
+
+	reader := bufio.NewReader(fd)
+
+	for {
+		line, errs := reader.ReadString('\n')
+		if errs != nil {
+			break
+		}
+
+		line = strings.Trim(line, "\n")
+		metas := strings.Split(line, " ")
+
+		w.CacheFileEntry(metas[0], metas[1])
+	}
+
+	return nil
 }
 
 // SendFileContent send one file to redis

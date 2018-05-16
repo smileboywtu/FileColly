@@ -3,14 +3,17 @@
 package colly
 
 import (
-	"fmt"
-	"sync"
 	"os"
 	"log"
-	"io/ioutil"
+	"fmt"
+	"sync"
+	"time"
+	"strconv"
 	"context"
+	"io/ioutil"
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	"github.com/smileboywtu/FileCollector/common"
 )
 
@@ -32,6 +35,9 @@ type Collector struct {
 	Rule    Rule
 	filters []FilterFuncs
 
+	// Files Deal numbers
+	FileCount int64
+
 	ctx        context.Context
 	cancleFunc context.CancelFunc
 }
@@ -43,6 +49,13 @@ func InitLogger(logFile string) {
 		fmt.Fprintf(os.Stderr, "open log file error")
 	}
 	logger = log.New(fd, "collector: ", log.Lshortfile)
+	logger.SetOutput(&lumberjack.Logger{
+		Filename:   logFile,
+		MaxSize:    500, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28,   //days
+		Compress:   true, // disabled by default
+	})
 }
 
 // NewCollector init a collector to collect file in directory
@@ -50,9 +63,12 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 
 	ctx, cancle := context.WithCancel(context.Background())
 
+	// init logger
+	InitLogger(opts.LogFileName)
+
 	// init backend option
 	redisOpts := &redis.Options{
-		Addr:       fmt.Sprintf("%s:%s", opts.RedisHost, opts.RedisPort),
+		Addr:       fmt.Sprintf("%s:%d", opts.RedisHost, opts.RedisPort),
 		DB:         opts.RedisDB,
 		Password:   opts.RedisPW,
 		MaxRetries: 3,
@@ -73,6 +89,7 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 		AppConfigs:     opts,
 		BackendInst:    backend,
 		FileWalkerInst: NewDirectoryWorker(opts.CollectDirectory, opts.ReaderMaxWorkers, rule, ctx),
+		FileCount:      0,
 		Rule:           rule,
 		filters:        make([]FilterFuncs, 0, 8),
 
@@ -85,6 +102,22 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 func (c *Collector) OnFilter(callback FilterFuncs) {
 	c.Lock()
 	c.filters = append(c.filters, callback)
+	c.Unlock()
+}
+
+func (c *Collector) GetFileCount() int64 {
+	return c.FileCount
+}
+
+func (c *Collector) IncreaseFileCount(n int) {
+	c.Lock()
+	c.FileCount += int64(n)
+	c.Unlock()
+}
+
+func (c *Collector) CountClear() {
+	c.Lock()
+	c.FileCount = 0
 	c.Unlock()
 }
 
@@ -127,61 +160,114 @@ func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeRe
 		copy(encoder.FileContent, data)
 		packBytes, err := encoder.Encode()
 		c.sendPoll(result, EncodeResult{item.FilePath, packBytes, err})
+
+		c.IncreaseFileCount(1)
 	}
 
 }
 
-func (c *Collector) SendFlow() {
+func (c *Collector) Start() {
 
 	var wg sync.WaitGroup
-	result := make(chan EncodeResult)
-
+	buffers := make(chan EncodeResult)
 	fileItems, errc := c.FileWalkerInst.Walk()
+
+	c.CountClear()
+	// load cache entry from db
+	if c.AppConfigs.LoadCacheDB {
+		errs := c.BackendInst.LoadEntryFromDB()
+		if errs != nil {
+			logger.Println("load cache to backend error: ", errs.Error())
+		}
+	}
 
 	wg.Add(c.AppConfigs.ReaderMaxWorkers)
 	for i := 0; i < c.AppConfigs.ReaderMaxWorkers; i++ {
 		go func() {
-			c.encodeFlow(fileItems, result)
+			c.encodeFlow(fileItems, buffers)
 			wg.Done()
 		}()
 	}
 	go func() {
 		wg.Wait()
-		close(result)
+		close(buffers)
 	}()
 
-	c.cacheFlow(result)
+	cacheBuffer := c.cacheFlow()
+	c.sendFlow(buffers, cacheBuffer)
+	close(cacheBuffer)
 
 	if err := <-errc; err != nil {
 		fmt.Println(err.Error())
 		logger.Println(err.Error())
 	}
 
+	logger.Printf("current time: %s, send file total: %d", time.Now().Format("2006-01-02T15:04:05"), c.FileCount)
+	c.BackendInst.DumpEntry2File()
 }
 
-// cacheFlow cache current file in pipeline and remove file from directory
+// sendFlow cache current file in pipeline and remove file from directory
 // if queue is out of limit size or reserve file is true, then do nothing
 // about the file
-func (c *Collector) cacheFlow(results <-chan EncodeResult) {
+func (c *Collector) sendFlow(buffers <-chan EncodeResult, cacheBuffer chan<- string) {
 
 	var wg sync.WaitGroup
 	wg.Add(c.AppConfigs.SenderMaxWorkers)
+
 	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
 		go func() {
-			for r := range results {
-				if false == c.BackendInst.IsAllow() && true == c.AppConfigs.ReserveFile {
+			for r := range buffers {
+				if !c.BackendInst.IsAllow() {
+					logger.Println("destination redis queue if full")
 					continue
 				}
 				if r.Err == nil {
 					c.BackendInst.SendFileContent(r.EncodeContent)
+					logger.Println("send file: ", r.Path)
+					// send for cache
+					cacheBuffer <- r.Path
 				}
-				os.Remove(r.Path)
 			}
 			wg.Done()
 		}()
 	}
 
 	wg.Wait()
+}
+
+// cacheFlow cache file entry in redis
+// if file reach the cache expire time then remove it
+func (c *Collector) cacheFlow() chan string {
+
+	cacheBuffer := make(chan string, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(c.AppConfigs.SenderMaxWorkers)
+
+	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
+		go func() {
+			for path := range cacheBuffer {
+
+				if !c.AppConfigs.ReserveFile {
+					os.Remove(path)
+				}
+
+				if timestamp, errs := c.BackendInst.CacheFileCheck(path); errs != nil {
+					c.BackendInst.CacheFileEntry(path, strconv.FormatInt(time.Now().Unix(), 10))
+				} else if before, _ := strconv.ParseInt(timestamp, 10, 64); before+int64(c.AppConfigs.FileCacheTimeout) > time.Now().Unix() {
+					os.Remove(path)
+					c.BackendInst.RemoveCacheEntry(path)
+				}
+			}
+			wg.Done()
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+	}()
+
+	return cacheBuffer
 }
 
 // GetMatch traverse the filters and check if file should be send

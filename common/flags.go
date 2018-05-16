@@ -1,18 +1,16 @@
 package common
 
 import (
-	"io/ioutil"
 	"log"
 	"os"
 	"reflect"
 	"strings"
-
-	"github.com/fatih/structs"
-	"github.com/urfave/cli"
-	"github.com/yudai/hcl"
-
-	"github.com/yudai/gotty/pkg/homedir"
+	"io/ioutil"
 	"gopkg.in/yaml.v2"
+	"github.com/yudai/hcl"
+	"github.com/urfave/cli"
+	"github.com/fatih/structs"
+	"github.com/yudai/gotty/pkg/homedir"
 )
 
 func GenerateFlags(options ...interface{}) (flags []cli.Flag, mappings map[string]string, err error) {

@@ -9,6 +9,7 @@ type AppConfigOption struct {
 	RedisDB   int    `yaml:"redis_db" flagName:"redisdb" flagSName:"rdb" flagDescribe:"Destination Cache Redis db" default:"0"`
 	RedisPW   string `yaml:"redis_passwd" flagName:"redispw" flagSName:"rpwd" flagDescribe:"Destination Cache Redis password" default:""`
 
+	LoadCacheDB                bool   `yaml:"load_cache" flagName:"loads" flagSName:"ldb" flagDescribe:"Load local file cache into backend" default:"false"`
 	CacheRedisQueueName        string `yaml:"cache_queue" flagName:"cqname" flagSName:"cq" flagDescribe:"Cache Redis Queue name" default:"nsfocus:paas:fileserver:cache"`
 	DestinationRedisQueueName  string `yaml:"dest_queue" flagName:"dqname" flagSName:"dq" flagDescribe:"Destination Redis Queue name" default:"nsfocus:paas:fileserver:files"`
 	DestinationRedisQueueLimit int    `yaml:"dest_queue_limit" flagName:"dqlimit" flagSName:"dql" flagDescribe:"Destination Redis Queue size limit" default:"3000"`

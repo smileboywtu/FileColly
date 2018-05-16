@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"os/signal"
+	"syscall"
 	"github.com/urfave/cli"
 	"github.com/yudai/gotty/pkg/homedir"
 	"github.com/smileboywtu/FileCollector/common"
@@ -64,12 +66,20 @@ func main() {
 			os.Exit(-1)
 		}
 
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGKILL, syscall.SIGTERM)
+
+		go func() {
+			<-sigs
+			colly.ShutDown()
+		}()
+
 		colly.FileWalkerInst.OnFilter(collector.FileWalkerGenericFilter)
 		colly.OnFilter(collector.CollectorGenericFilter)
 
 		for {
-			colly.SendFlow()
-			time.Sleep(time.Duration(3 * time.Second))
+			colly.Start()
+			time.Sleep(time.Duration(1 * time.Second))
 		}
 	}
 
