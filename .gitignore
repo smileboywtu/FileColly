@@ -1,6 +1,8 @@
 .idea/
 sender.log
 main
+filecolly
+
 # Binaries for programs and plugins
 *.exe
 *.dll

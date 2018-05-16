@@ -1,0 +1,20 @@
+
+redis_host: 10.5.24.59
+redis_port: 6379
+redis_db: 0
+redis_passwd: 12345
+
+cache_queue: nsfocus:paas:fileserver:cache
+cache_timeout: 3600
+reserve_file: true
+
+dest_queue: nsfocus:paas:fileserver:files
+dest_queue_limit: 3000
+
+max_reader: 500
+max_sender: 500
+
+collect_directory: .
+file_limit: 200M
+read_wait_time: 3
+log_file: sender.log

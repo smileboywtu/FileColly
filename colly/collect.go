@@ -1,3 +1,5 @@
+// colly define the flow to file collecting
+// and cache policy
 package colly
 
 import (
@@ -6,39 +8,32 @@ import (
 	"os"
 	"log"
 	"io/ioutil"
-	"github.com/pkg/errors"
 	"context"
+	"github.com/pkg/errors"
+	"github.com/go-redis/redis"
+	"github.com/smileboywtu/FileCollector/common"
 )
 
 var logger *log.Logger
 
-type FilterCallback func(filepath string) bool
-
-type EncodeResult struct {
-	Path          string
-	EncodeContent string
-	Err           error
-}
-
 type Collector struct {
 	sync.RWMutex
-	Backend         CacheWriter
-	Walker          *FileWalker
-	SingleLimitSize int64
-	ParallelReaders int
-	ParallelSenders int
-	ReserveFlag     bool
-	filtercallbacks []FilterCallback
-	ctx             context.Context
-	cancleFunc      context.CancelFunc
-}
 
-type CollectorError struct {
-	prob string
-}
+	// App Configs
+	AppConfigs *AppConfigOption
 
-func (e *CollectorError) Error() string {
-	return fmt.Sprintf("%s", e.prob)
+	// Backend Redis Instance
+	BackendInst *RedisWriter
+
+	// File Walker Instance
+	FileWalkerInst *FileWalker
+
+	// File filters
+	Rule    Rule
+	filters []FilterFuncs
+
+	ctx        context.Context
+	cancleFunc context.CancelFunc
 }
 
 func InitLogger(logFile string) {
@@ -50,44 +45,60 @@ func InitLogger(logFile string) {
 	logger = log.New(fd, "collector: ", log.Lshortfile)
 }
 
-func NewCollector(
-	root string,
-	limitSize int64,
-	backend CacheWriter,
-	readerNumber int,
-	senderNumber int,
-	reserveFlag bool) *Collector {
+// NewCollector init a collector to collect file in directory
+func NewCollector(opts *AppConfigOption) (*Collector, error) {
 
 	ctx, cancle := context.WithCancel(context.Background())
-	c := Collector{
-		Backend:         backend,
-		filtercallbacks: make([]FilterCallback, 0, 8),
-		ParallelReaders: readerNumber,
-		ParallelSenders: senderNumber,
-		ReserveFlag:     reserveFlag,
-		ctx:             ctx,
-		cancleFunc:      cancle,
-	}
-	c.Walker = NewWalker(root, limitSize, 50, ctx)
 
-	return &c
+	// init backend option
+	redisOpts := &redis.Options{
+		Addr:       fmt.Sprintf("%s:%s", opts.RedisHost, opts.RedisPort),
+		DB:         opts.RedisDB,
+		Password:   opts.RedisPW,
+		MaxRetries: 3,
+	}
+	backend, errs := NewRedisWriter(redisOpts, opts.CacheRedisQueueName, opts.DestinationRedisQueueName, opts.DestinationRedisQueueLimit)
+	if backend == nil || errs != nil {
+		return nil, errs
+	}
+
+	rule := Rule{
+		FileSizeLimit:   common.HumanSize2Bytes(opts.FileMaxSize),
+		ReserveFile:     opts.ReserveFile,
+		CollectWaitTime: opts.ReadWaitTime,
+		AllowEmpty:      false,
+	}
+
+	return &Collector{
+		AppConfigs:     opts,
+		BackendInst:    backend,
+		FileWalkerInst: NewDirectoryWorker(opts.CollectDirectory, opts.ReaderMaxWorkers, rule, ctx),
+		Rule:           rule,
+		filters:        make([]FilterFuncs, 0, 8),
+
+		ctx:        ctx,
+		cancleFunc: cancle,
+	}, nil
 }
 
-func (c *Collector) OnFilter(callback FilterCallback) {
+// OnFilter add new filter to collector
+func (c *Collector) OnFilter(callback FilterFuncs) {
 	c.Lock()
-	c.filtercallbacks = append(c.filtercallbacks, callback)
+	c.filters = append(c.filters, callback)
 	c.Unlock()
 }
 
+// ListCacheFiles get current cache file from backend
 func (c *Collector) ListCacheFiles() []string {
-	if result, err := c.Backend.GetCacheEntry(); err != nil {
+	if result, err := c.BackendInst.GetCacheEntry(); err != nil {
 		return nil
 	} else {
 		return result
 	}
 }
 
-func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
+// sendPoll send file to
+func (c *Collector) sendPoll(result chan<- EncodeResult, item EncodeResult) {
 	select {
 	case result <- item:
 	case <-c.ctx.Done():
@@ -95,40 +106,42 @@ func (c *Collector) SendPoll(result chan<- EncodeResult, item EncodeResult) {
 	}
 }
 
-func (c *Collector) EncodingFile(fileItems <-chan FileItem, result chan<- EncodeResult) {
+// encodeFlow encodes file content and send to backend
+func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeResult) {
 
 	for item := range fileItems {
 
 		if !c.GetMatch(item.FilePath) {
-			c.SendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
+			c.sendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
+			continue
 		}
 
 		data, err := ioutil.ReadFile(item.FilePath)
 		if err != nil {
-			c.SendPoll(result, EncodeResult{item.FilePath, "", err})
+			c.sendPoll(result, EncodeResult{item.FilePath, "", err})
 		}
-		encoder := &FileEncoder{
+		encoder := &FileContentEncoder{
 			FilePath:    item.FileIndex,
 			FileContent: make([]byte, len(data)),
 		}
 		copy(encoder.FileContent, data)
 		packBytes, err := encoder.Encode()
-		c.SendPoll(result, EncodeResult{item.FilePath, packBytes, err})
+		c.sendPoll(result, EncodeResult{item.FilePath, packBytes, err})
 	}
 
 }
 
-func (c *Collector) Sync() {
+func (c *Collector) SendFlow() {
 
 	var wg sync.WaitGroup
 	result := make(chan EncodeResult)
 
-	fileItems, errc := c.Walker.Walk()
+	fileItems, errc := c.FileWalkerInst.Walk()
 
-	wg.Add(c.ParallelReaders)
-	for i := 0; i < c.ParallelReaders; i++ {
+	wg.Add(c.AppConfigs.ReaderMaxWorkers)
+	for i := 0; i < c.AppConfigs.ReaderMaxWorkers; i++ {
 		go func() {
-			c.EncodingFile(fileItems, result)
+			c.encodeFlow(fileItems, result)
 			wg.Done()
 		}()
 	}
@@ -137,7 +150,7 @@ func (c *Collector) Sync() {
 		close(result)
 	}()
 
-	c.Cache(result)
+	c.cacheFlow(result)
 
 	if err := <-errc; err != nil {
 		fmt.Println(err.Error())
@@ -146,19 +159,21 @@ func (c *Collector) Sync() {
 
 }
 
-func (c *Collector) Cache(results <-chan EncodeResult) {
+// cacheFlow cache current file in pipeline and remove file from directory
+// if queue is out of limit size or reserve file is true, then do nothing
+// about the file
+func (c *Collector) cacheFlow(results <-chan EncodeResult) {
 
 	var wg sync.WaitGroup
-	wg.Add(c.ParallelSenders)
-
-	for i := 0; i < c.ParallelSenders; i++ {
+	wg.Add(c.AppConfigs.SenderMaxWorkers)
+	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
 		go func() {
 			for r := range results {
-				if false == c.Backend.IsAllow() && true == c.ReserveFlag {
+				if false == c.BackendInst.IsAllow() && true == c.AppConfigs.ReserveFile {
 					continue
 				}
 				if r.Err == nil {
-					c.Backend.CacheFileContent(r.EncodeContent)
+					c.BackendInst.SendFileContent(r.EncodeContent)
 				}
 				os.Remove(r.Path)
 			}
@@ -169,10 +184,11 @@ func (c *Collector) Cache(results <-chan EncodeResult) {
 	wg.Wait()
 }
 
+// GetMatch traverse the filters and check if file should be send
 func (c *Collector) GetMatch(filepath string) bool {
-	if len(c.filtercallbacks) > 0 {
-		for _, filter := range c.filtercallbacks {
-			if !filter(filepath) {
+	if len(c.filters) > 0 {
+		for _, filterFunc := range c.filters {
+			if !filterFunc(filepath, c.Rule) {
 				return false
 			}
 		}
@@ -180,6 +196,7 @@ func (c *Collector) GetMatch(filepath string) bool {
 	return true
 }
 
+// ShutDown close the file collect daemon
 func (c *Collector) ShutDown() {
 	c.cancleFunc()
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/go-redis/redis/internal"
 	"github.com/go-redis/redis/internal/pool"
 	"github.com/go-redis/redis/internal/proto"
+	"github.com/go-redis/redis/internal/util"
 )
 
 type Cmder interface {
@@ -81,14 +82,14 @@ func cmdFirstKeyPos(cmd Cmder, info *CommandInfo) int {
 	case "eval", "evalsha":
 		if cmd.stringArg(2) != "0" {
 			return 3
-		} else {
-			return -1
 		}
+
+		return 0
 	case "publish":
 		return 1
 	}
 	if info == nil {
-		return -1
+		return 0
 	}
 	return int(info.FirstKeyPos)
 }
@@ -436,7 +437,7 @@ func NewStringCmd(args ...interface{}) *StringCmd {
 }
 
 func (cmd *StringCmd) Val() string {
-	return internal.BytesToString(cmd.val)
+	return util.BytesToString(cmd.val)
 }
 
 func (cmd *StringCmd) Result() (string, error) {
@@ -670,6 +671,44 @@ func (cmd *StringIntMapCmd) readReply(cn *pool.Conn) error {
 		return cmd.err
 	}
 	cmd.val = v.(map[string]int64)
+	return nil
+}
+
+//------------------------------------------------------------------------------
+
+type StringStructMapCmd struct {
+	baseCmd
+
+	val map[string]struct{}
+}
+
+var _ Cmder = (*StringStructMapCmd)(nil)
+
+func NewStringStructMapCmd(args ...interface{}) *StringStructMapCmd {
+	return &StringStructMapCmd{
+		baseCmd: baseCmd{_args: args},
+	}
+}
+
+func (cmd *StringStructMapCmd) Val() map[string]struct{} {
+	return cmd.val
+}
+
+func (cmd *StringStructMapCmd) Result() (map[string]struct{}, error) {
+	return cmd.val, cmd.err
+}
+
+func (cmd *StringStructMapCmd) String() string {
+	return cmdString(cmd, cmd.val)
+}
+
+func (cmd *StringStructMapCmd) readReply(cn *pool.Conn) error {
+	var v interface{}
+	v, cmd.err = cn.Rd.ReadArrayReply(stringStructMapParser)
+	if cmd.err != nil {
+		return cmd.err
+	}
+	cmd.val = v.(map[string]struct{})
 	return nil
 }
 
@@ -983,4 +1022,27 @@ func (cmd *CommandsInfoCmd) readReply(cn *pool.Conn) error {
 	}
 	cmd.val = v.(map[string]*CommandInfo)
 	return nil
+}
+
+//------------------------------------------------------------------------------
+
+type cmdsInfoCache struct {
+	once internal.Once
+	cmds map[string]*CommandInfo
+}
+
+func newCmdsInfoCache() *cmdsInfoCache {
+	return &cmdsInfoCache{}
+}
+
+func (c *cmdsInfoCache) Do(fn func() (map[string]*CommandInfo, error)) (map[string]*CommandInfo, error) {
+	err := c.once.Do(func() error {
+		cmds, err := fn()
+		if err != nil {
+			return err
+		}
+		c.cmds = cmds
+		return nil
+	})
+	return c.cmds, err
 }

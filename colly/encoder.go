@@ -4,16 +4,24 @@ package colly
 import (
 	"bytes"
 	"compress/zlib"
-	"github.com/vmihailenco/msgpack"
 	"encoding/base64"
+	"github.com/vmihailenco/msgpack"
 )
 
-type FileEncoder struct {
+type FileContentEncoder struct {
 	FilePath    string
 	FileContent []byte
 }
 
-func (c *FileEncoder) Encode() (string, error) {
+type EncodeResult struct {
+	Path          string
+	EncodeContent string
+	Err           error
+}
+
+// Encode encode data in base64 format and
+// compress use msgpack
+func (c *FileContentEncoder) Encode() (string, error) {
 
 	var buf bytes.Buffer
 	writer, err := zlib.NewWriterLevel(&buf, 6)

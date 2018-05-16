@@ -1,122 +1,84 @@
 package main
 
 import (
-	"github.com/go-redis/redis"
 	"fmt"
-	"github.com/smileboywtu/FileCollector/colly"
 	"os"
-	"github.com/go-ini/ini"
-	"strconv"
 	"time"
-	"flag"
-	"github.com/pkg/errors"
+	"github.com/urfave/cli"
+	"github.com/yudai/gotty/pkg/homedir"
+	"github.com/smileboywtu/FileCollector/common"
+	collector "github.com/smileboywtu/FileCollector/colly"
 )
 
-// Get bytes
-func getBytes(size string) int64 {
-
-	weight := size[len(size)-1]
-	ret, err := strconv.Atoi(size[:len(size)-1])
-	if err != nil {
-		panic(ret)
-	}
-	ret64 := int64(ret)
-	if weight == 'B' {
-		return ret64
-	} else if weight == 'K' {
-		return ret64 * (1 << 10)
-	} else if weight == 'M' {
-		return ret64 * (1 << 20)
-	} else if weight == 'G' {
-		return ret64 * (1 << 30)
-	}
-
-	return ret64
-}
-
-// Parse user config
-func parseConfig(file string) *colly.Collector {
-
-	// load config file
-	appconf, err := ini.Load(file)
-	if err != nil {
-		panic(err)
-	}
-
-	rhost := appconf.Section("redis").Key("host").String()
-	rport := appconf.Section("redis").Key("port").String()
-	rdb, err := appconf.Section("redis").Key("db").Int()
-	if err != nil {
-		panic(err)
-	}
-
-	var opts *redis.Options
-	if passwd := appconf.Section("redis").Key("passwd").String(); len(passwd) == 0 {
-		opts = &redis.Options{
-			Addr:       fmt.Sprintf("%s:%s", rhost, rport),
-			DB:         rdb,
-			MaxRetries: 3,
-		}
-	} else {
-		opts = &redis.Options{
-			Addr:       fmt.Sprintf("%s:%s", rhost, rport),
-			DB:         rdb,
-			Password:   passwd,
-			MaxRetries: 3,
-		}
-	}
-
-	// init log
-	lfile := appconf.Section("log").Key("log_file").String()
-	colly.InitLogger(lfile)
-
-	// init collector
-	collyDir := appconf.Section("collector").Key("collect_dir").String()
-	sendQName := appconf.Section("collector").Key("send_queue_name").String()
-	cacheQName := appconf.Section("collector").Key("cache_queue_name").String()
-	maxFileSize := appconf.Section("collector").Key("max_file_size").String()
-	readerNumber, err := appconf.Section("collector").Key("max_reader_workers").Int()
-	if err != nil {
-		panic(errors.New("max_reader_workers must be integer"))
-	}
-	senderNumber, err := appconf.Section("collector").Key("max_sender_workers").Int()
-	if err != nil {
-		panic(errors.New("max_sender_workers must be integer"))
-	}
-	queueLimitSize, err := appconf.Section("collector").Key("max_cache_file").Int()
-	if err != nil {
-		panic(errors.New("max_cache_file must be integer"))
-	}
-	reserveFile, err := appconf.Section("collector").Key("reserve_file").Bool()
-	if err != nil {
-		panic(errors.New("reserve_file must be bool type"))
-	}
-	backend, err := colly.NewRedisWriter(opts, cacheQName, sendQName, queueLimitSize)
-	if backend == nil || err != nil {
-		fmt.Fprintf(os.Stderr, "redis connect error")
-		os.Exit(-1)
-	}
-	return colly.NewCollector(
-		collyDir,
-		getBytes(maxFileSize),
-		backend,
-		readerNumber,
-		senderNumber,
-		reserveFile)
-
-}
+var email string
+var author string
+var version string
 
 func main() {
 
-	configFile := flag.String("c", "config.ini", "file collector config file path")
+	app := cli.NewApp()
+	app.Name = "File Collector"
+	app.Version = version
+	app.Author = author
+	app.Email = email
+	app.Usage = "collect file from directory and send to redis"
+	app.HideHelp = true
 
-	flag.Parse()
+	cli.AppHelpTemplate = helpTemplate
 
-	c := parseConfig(*configFile)
-
-	for {
-		c.Sync()
-		time.Sleep(1 * time.Millisecond)
+	appOptions := &collector.AppConfigOption{}
+	if err := common.ApplyDefaultValues(appOptions); err != nil {
+		exit(err, 1)
 	}
 
+	cliFlags, flagMappings, err := common.GenerateFlags(appOptions)
+	if err != nil {
+		exit(err, 3)
+	}
+
+	app.Flags = append(
+		cliFlags,
+		cli.StringFlag{
+			Name:   "config",
+			Value:  "config.yaml",
+			Usage:  "Config file path",
+			EnvVar: "CROC_CONFIG",
+		},
+	)
+
+	app.Action = func(c *cli.Context) {
+
+		configFile := c.String("config")
+		_, err := os.Stat(homedir.Expand(configFile))
+		if configFile != "config.yaml" || !os.IsNotExist(err) {
+			if err := common.ApplyConfigFileYaml(configFile, appOptions); err != nil {
+				exit(err, 2)
+			}
+		}
+
+		common.ApplyFlags(cliFlags, flagMappings, c, appOptions)
+
+		colly, errs := collector.NewCollector(appOptions)
+		if errs != nil {
+			fmt.Fprintf(os.Stderr, "start error: %s", errs.Error())
+			os.Exit(-1)
+		}
+
+		colly.FileWalkerInst.OnFilter(collector.FileWalkerGenericFilter)
+		colly.OnFilter(collector.CollectorGenericFilter)
+
+		for {
+			colly.SendFlow()
+			time.Sleep(time.Duration(3 * time.Second))
+		}
+	}
+
+	app.Run(os.Args)
+}
+
+func exit(err error, code int) {
+	if err != nil {
+		fmt.Println(err)
+	}
+	os.Exit(code)
 }

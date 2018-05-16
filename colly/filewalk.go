@@ -4,11 +4,12 @@
 package colly
 
 import (
-	"strings"
 	"os"
+	"sync"
+	"strings"
+	"context"
 	"path/filepath"
 	"github.com/pkg/errors"
-	"context"
 )
 
 type FileItem struct {
@@ -18,19 +19,30 @@ type FileItem struct {
 }
 
 type FileWalker struct {
-	Root          string
-	FileLimitSize int64
+	sync.RWMutex
+	Directory     string
 	MaxWalkerSize int
+	filters       []FilterFuncs
+	Rule          Rule
 	Ctx           context.Context
 }
 
-func NewWalker(root string, limitSize int64, workers int, ctx context.Context) *FileWalker {
+// NewDirectoryWorker create new worker to enumerate files in directory
+func NewDirectoryWorker(directory string, workers int, rule Rule, ctx context.Context) *FileWalker {
 	return &FileWalker{
-		Root:          root,
-		FileLimitSize: limitSize,
+		Directory:     directory,
 		MaxWalkerSize: workers,
+		filters:       make([]FilterFuncs, 0, 5),
+		Rule:          rule,
 		Ctx:           ctx,
 	}
+}
+
+// OnFilter add file filter to file workers
+func (w *FileWalker) OnFilter(callback FilterFuncs) {
+	w.Lock()
+	w.filters = append(w.filters, callback)
+	w.Unlock()
 }
 
 func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
@@ -50,14 +62,17 @@ func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
 				return nil
 			}
 
-			if info.Size() >= w.FileLimitSize {
-				return nil
+			// filters
+			for _, filterFunc := range w.filters {
+				if !filterFunc(path, w.Rule) {
+					return nil
+				}
 			}
 
 			select {
 			case files <- FileItem{
 				FilePath:  path,
-				FileIndex: w.TrimRootDirectoryPath(path),
+				FileIndex: w.TrimDirectoryDirectoryPath(path),
 				FileSize:  info.Size(),
 			}:
 			case <-w.Ctx.Done():
@@ -72,9 +87,9 @@ func (w *FileWalker) WalkDir(dirName string) (<-chan FileItem, <-chan error) {
 }
 
 func (w *FileWalker) Walk() (<-chan FileItem, <-chan error) {
-	return w.WalkDir(w.Root)
+	return w.WalkDir(w.Directory)
 }
 
-func (w *FileWalker) TrimRootDirectoryPath(path string) string {
-	return strings.TrimPrefix(path, w.Root)
+func (w *FileWalker) TrimDirectoryDirectoryPath(path string) string {
+	return strings.TrimPrefix(path, w.Directory)
 }

@@ -2,10 +2,7 @@ package msgpack_test
 
 import (
 	"bytes"
-	"encoding/binary"
-	"encoding/csv"
-	"encoding/gob"
-	"encoding/json"
+	"io/ioutil"
 	"math"
 	"testing"
 	"time"
@@ -13,10 +10,25 @@ import (
 	"github.com/vmihailenco/msgpack"
 )
 
+func BenchmarkDiscard(b *testing.B) {
+	enc := msgpack.NewEncoder(ioutil.Discard)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if err := enc.Encode(nil); err != nil {
+			b.Fatal(err)
+		}
+		if err := enc.Encode("hello"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func benchmarkEncodeDecode(b *testing.B, src, dst interface{}) {
 	var buf bytes.Buffer
-	dec := msgpack.NewDecoder(&buf)
 	enc := msgpack.NewEncoder(&buf)
+	dec := msgpack.NewDecoder(&buf)
 
 	b.ResetTimer()
 
@@ -65,20 +77,6 @@ func BenchmarkInt32(b *testing.B) {
 	benchmarkEncodeDecode(b, int32(0), &dst)
 }
 
-func BenchmarkInt0Binary(b *testing.B) {
-	var buf bytes.Buffer
-	var out int32
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := binary.Write(&buf, binary.BigEndian, int32(1)); err != nil {
-			b.Fatal(err)
-		}
-		if err := binary.Read(&buf, binary.BigEndian, &out); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func BenchmarkTime(b *testing.B) {
 	var dst time.Time
 	benchmarkEncodeDecode(b, time.Now(), &dst)
@@ -99,6 +97,12 @@ func BenchmarkByteArray(b *testing.B) {
 	var src [1024]byte
 	var dst [1024]byte
 	benchmarkEncodeDecode(b, src, &dst)
+}
+
+func BenchmarkByteArrayPtr(b *testing.B) {
+	var src [1024]byte
+	var dst [1024]byte
+	benchmarkEncodeDecode(b, &src, &dst)
 }
 
 func BenchmarkMapStringString(b *testing.B) {
@@ -285,47 +289,7 @@ func BenchmarkStructManual(b *testing.B) {
 	}
 }
 
-func BenchmarkStructJSON(b *testing.B) {
-	in := structForBenchmark()
-	out := new(benchmarkStruct)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		buf, err := json.Marshal(in)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		err = json.Unmarshal(buf, out)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkStructGOB(b *testing.B) {
-	in := structForBenchmark()
-	out := new(benchmarkStruct)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		buf := new(bytes.Buffer)
-		enc := gob.NewEncoder(buf)
-		dec := gob.NewDecoder(buf)
-
-		if err := enc.Encode(in); err != nil {
-			b.Fatal(err)
-		}
-
-		if err := dec.Decode(out); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-type benchmarkSubStruct struct {
+type benchmarkStructPartially struct {
 	Name string
 	Age  int
 }
@@ -336,49 +300,13 @@ func BenchmarkStructUnmarshalPartially(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	out := &benchmarkSubStruct{}
+	out := new(benchmarkStructPartially)
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		err = msgpack.Unmarshal(buf, out)
 		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCSV(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		record := []string{"1", "hello", "world"}
-
-		buf := new(bytes.Buffer)
-		r := csv.NewReader(buf)
-		w := csv.NewWriter(buf)
-
-		if err := w.Write(record); err != nil {
-			b.Fatal(err)
-		}
-		w.Flush()
-		if _, err := r.Read(); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCSVMsgpack(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		var num int
-		var hello, world string
-
-		buf := new(bytes.Buffer)
-		enc := msgpack.NewEncoder(buf)
-		dec := msgpack.NewDecoder(buf)
-
-		if err := enc.Encode(1, "hello", "world"); err != nil {
-			b.Fatal(err)
-		}
-		if err := dec.Decode(&num, &hello, &world); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -410,7 +338,7 @@ func BenchmarkQuery(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if values[0].(uint64) != 10 {
+		if values[0].(int8) != 10 {
 			b.Fatalf("%v != %d", values[0], 10)
 		}
 	}

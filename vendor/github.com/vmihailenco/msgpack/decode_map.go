@@ -1,6 +1,7 @@
 package msgpack
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -14,6 +15,8 @@ var mapStringStringType = mapStringStringPtrType.Elem()
 
 var mapStringInterfacePtrType = reflect.TypeOf((*map[string]interface{})(nil))
 var mapStringInterfaceType = mapStringInterfacePtrType.Elem()
+
+var errInvalidCode = errors.New("invalid code")
 
 func decodeMapValue(d *Decoder, v reflect.Value) error {
 	n, err := d.DecodeMapLen()
@@ -65,7 +68,7 @@ func decodeMap(d *Decoder) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		mv, err := d.DecodeInterface()
+		mv, err := d.decodeInterface()
 		if err != nil {
 			return nil, err
 		}
@@ -90,11 +93,16 @@ func (d *Decoder) DecodeMapLen() (int, error) {
 			return 0, err
 		}
 	}
-
 	return d.mapLen(c)
 }
 
 func (d *Decoder) mapLen(c codes.Code) (int, error) {
+	n, err := d._mapLen(c)
+	err = expandInvalidCodeMapLenError(c, err)
+	return n, err
+}
+
+func (d *Decoder) _mapLen(c codes.Code) (int, error) {
 	if c == codes.Nil {
 		return -1, nil
 	}
@@ -109,7 +117,14 @@ func (d *Decoder) mapLen(c codes.Code) (int, error) {
 		n, err := d.uint32()
 		return int(n), err
 	}
-	return 0, fmt.Errorf("msgpack: invalid code=%x decoding map length", c)
+	return 0, errInvalidCode
+}
+
+func expandInvalidCodeMapLenError(c codes.Code, err error) error {
+	if err == errInvalidCode {
+		return fmt.Errorf("msgpack: invalid code=%x decoding map length", c)
+	}
+	return err
 }
 
 func decodeMapStringStringValue(d *Decoder, v reflect.Value) error {
@@ -174,7 +189,7 @@ func (d *Decoder) decodeMapStringInterfacePtr(ptr *map[string]interface{}) error
 		if err != nil {
 			return err
 		}
-		mv, err := d.DecodeInterface()
+		mv, err := d.decodeInterface()
 		if err != nil {
 			return err
 		}
@@ -204,7 +219,7 @@ func (d *Decoder) skipMap(c codes.Code) error {
 	return nil
 }
 
-func decodeStructValue(d *Decoder, strct reflect.Value) error {
+func decodeStructValue(d *Decoder, v reflect.Value) error {
 	c, err := d.readCode()
 	if err != nil {
 		return err
@@ -212,28 +227,36 @@ func decodeStructValue(d *Decoder, strct reflect.Value) error {
 
 	var isArray bool
 
-	n, err := d.mapLen(c)
+	n, err := d._mapLen(c)
 	if err != nil {
 		var err2 error
 		n, err2 = d.arrayLen(c)
 		if err2 != nil {
-			return err
+			return expandInvalidCodeMapLenError(c, err)
 		}
 		isArray = true
 	}
 	if n == -1 {
-		strct.Set(reflect.Zero(strct.Type()))
+		if err = mustSet(v); err != nil {
+			return err
+		}
+		v.Set(reflect.Zero(v.Type()))
 		return nil
 	}
 
-	fields := structs.Fields(strct.Type())
+	var fields *fields
+	if d.useJSONTag {
+		fields = jsonStructs.Fields(v.Type())
+	} else {
+		fields = structs.Fields(v.Type())
+	}
 
 	if isArray {
 		for i, f := range fields.List {
 			if i >= n {
 				break
 			}
-			if err := f.DecodeValue(d, strct); err != nil {
+			if err := f.DecodeValue(d, v); err != nil {
 				return err
 			}
 		}
@@ -252,7 +275,7 @@ func decodeStructValue(d *Decoder, strct reflect.Value) error {
 			return err
 		}
 		if f := fields.Table[name]; f != nil {
-			if err := f.DecodeValue(d, strct); err != nil {
+			if err := f.DecodeValue(d, v); err != nil {
 				return err
 			}
 		} else {
