@@ -6,15 +6,12 @@ collect local file and send compress content to redis
 
 # Practice
 
-- Golang
-- File pipeline
-- readers worker pool
-- sender worker pool
 - msgpack support
 - compress binary
 - high performance
-- configurable
-- dep vendor
+- configurable by yaml
+- command line flags
+- cache file support
  
 # How to start
 
@@ -24,9 +21,11 @@ git clone https://github.com/smileboywtu/FileColly.git
 ```
 2. install golang official `dep` and run inside project directory:
 ``` shell
+go get -u github.com/golang/dep/cmd/dep
+
 dep ensure
 ```
 3. build binary, then config:
 ``` shell
-go build -ldflags "-w -s" main.go
+./build.sh
 ```
