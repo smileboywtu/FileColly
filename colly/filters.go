@@ -11,7 +11,7 @@ type Rule struct {
 	FileSizeLimit   int64
 	AllowEmpty      bool
 	ReserveFile     bool
-	CollectWaitTime int64
+	CollectWaitTime int
 }
 
 type FilterFuncs func(filepath string, rule Rule) bool
@@ -41,7 +41,7 @@ func FileWalkerGenericFilter(filepath string, rule Rule) bool {
 	}
 
 	// can't be read now
-	if fileMeta.ModTime().Unix()+rule.CollectWaitTime > time.Now().Unix() {
+	if fileMeta.ModTime().Unix()+int64(rule.CollectWaitTime) > time.Now().Unix() {
 		return false
 	}
 
