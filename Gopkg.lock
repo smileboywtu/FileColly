@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/corpix/uarand"
+  packages = ["."]
+  revision = "2b8494104d86337cdd41d0a49cbed8e4583c0ab4"
+
+[[projects]]
   name = "github.com/fatih/structs"
   packages = ["."]
   revision = "a720dfa8df582c51dee1b36feabb906bde1588bd"
@@ -24,6 +30,12 @@
   name = "github.com/hashicorp/go-multierror"
   packages = ["."]
   revision = "b7773ae218740a7be65057fc60b366a49b538a44"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/icrowley/fake"
+  packages = ["."]
+  revision = "4178557ae428460c3780a381c824a1f3aceb6325"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -76,6 +88,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "280ea2dbb9e5f6c6fa63db4c7825ce0d99d201194cafb4c2fcf50deb9040ea6f"
+  inputs-digest = "912ac40d4027534282422b674b92047bd9fca57b3a2ac6db3629073daca7cd43"
   solver-name = "gps-cdcl"
   solver-version = 1
