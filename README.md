@@ -66,6 +66,8 @@ ok  	github.com/smileboywtu/FileColly/colly	9.252s
 
 ## collector benchmark
 
+if you want to run test on your machine, first `run build_testdata.sh` inside `hack` directory
+
 ``` shell
 go test -v -bench=. ./colly -run=BenchmarkCollector_Start
 goos: linux
@@ -77,4 +79,5 @@ BenchmarkCollector_Start-8               	       1	239480616423 ns/op
 ## summary
 
 file count: 500000  2092 f/s
+
 filesize: 20 Bytes
