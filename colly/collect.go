@@ -195,6 +195,8 @@ func (c *Collector) Start() {
 
 	cacheBuffer := c.cacheFlow()
 	c.sendFlow(buffers, cacheBuffer)
+
+	// close the cache buffer
 	close(cacheBuffer)
 
 	if err := <-errc; err != nil {
