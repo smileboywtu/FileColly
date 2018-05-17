@@ -13,7 +13,6 @@
 //	PASS
 //	ok  	github.com/smileboywtu/FileColly/colly	9.252s
 
-
 package colly
 
 import "testing"
