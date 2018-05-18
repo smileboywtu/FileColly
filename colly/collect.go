@@ -259,7 +259,7 @@ func (c *Collector) cacheFlow() chan string {
 
 				if timestamp, errs := c.BackendInst.CacheFileCheck(path); errs != nil {
 					c.BackendInst.CacheFileEntry(path, strconv.FormatInt(time.Now().Unix(), 10))
-				} else if before, _ := strconv.ParseInt(timestamp, 10, 64); before+int64(c.AppConfigs.FileCacheTimeout) > time.Now().Unix() {
+				} else if before, _ := strconv.ParseInt(timestamp, 10, 64); before+int64(c.AppConfigs.FileCacheTimeout) <= time.Now().Unix() {
 					os.Remove(path)
 					c.BackendInst.RemoveCacheEntry(path)
 				}

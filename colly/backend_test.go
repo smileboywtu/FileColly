@@ -91,3 +91,36 @@ func TestRedisWriter_DumpEntry2File(t *testing.T) {
 	}
 
 }
+
+func TestRedisWriter_RemoveCacheEntry(t *testing.T) {
+	cachetimeout := 2
+
+	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
+	if errs != nil {
+		t.Fatal(errs.Error())
+	}
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	filepath := "/tmp/a.txt"
+
+	inst.CacheFileEntry(filepath, timestamp)
+
+	done := make(chan bool, 1)
+	time.AfterFunc(time.Duration(cachetimeout+1)*time.Second, func() {
+		timestampbefore, errs := inst.CacheFileCheck(filepath)
+		if errs != nil {
+			t.Fatal(errors.New("cache file lost"))
+		}
+		if before, _ := strconv.ParseInt(timestampbefore, 10, 64); before+int64(cachetimeout) <= time.Now().Unix() {
+			inst.RemoveCacheEntry(filepath)
+		}
+
+		if _, errs := inst.CacheFileCheck(filepath); errs == nil {
+			t.Fatal(errors.New("cache file not remove after cache timeout"))
+		}
+
+		done <- true
+	})
+
+	<-done
+}
