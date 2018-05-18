@@ -8,7 +8,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
-	"os"
 )
 
 var opts = &redis.Options{
@@ -61,36 +60,36 @@ func TestRedisWriter_CacheFileEntry(t *testing.T) {
 	}
 }
 
-func TestRedisWriter_DumpEntry2File(t *testing.T) {
-	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
-	if errs != nil {
-		t.Fatal(errs.Error())
-	}
-
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	filepath := "/tmp/a.txt"
-
-	errs = inst.CacheFileEntry(filepath, timestamp)
-	if errs != nil {
-		t.Fatal(errs)
-	}
-
-	errs = inst.DumpEntry2File()
-	if errs != nil {
-		t.Fatal(errs)
-	}
-
-	// remove cache
-	inst.RemoveCacheEntry(filepath)
-	inst.LoadEntryFromDB()
-
-	os.Remove("dumpdb.txt")
-	before, errs := inst.CacheFileCheck(filepath)
-	if before != timestamp {
-		t.Error(errors.New("dumps and loads DB from local file fails"))
-	}
-
-}
+//func TestRedisWriter_DumpEntry2File(t *testing.T) {
+//	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
+//	if errs != nil {
+//		t.Fatal(errs.Error())
+//	}
+//
+//	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+//	filepath := "/tmp/a.txt"
+//
+//	errs = inst.CacheFileEntry(filepath, timestamp)
+//	if errs != nil {
+//		t.Fatal(errs)
+//	}
+//
+//	errs = inst.DumpEntry2File()
+//	if errs != nil {
+//		t.Fatal(errs)
+//	}
+//
+//	// remove cache
+//	inst.RemoveCacheEntry(filepath)
+//	inst.LoadEntryFromDB()
+//
+//	os.Remove("dumpdb.txt")
+//	before, errs := inst.CacheFileCheck(filepath)
+//	if before != timestamp {
+//		t.Error(errors.New("dumps and loads DB from local file fails"))
+//	}
+//
+//}
 
 func TestRedisWriter_RemoveCacheEntry(t *testing.T) {
 	cachetimeout := 2
