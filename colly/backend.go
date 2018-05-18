@@ -72,12 +72,12 @@ func (w *RedisWriter) CacheFileEntry(filepath string, timestamp string) error {
 	return err
 }
 
-func (w *RedisWriter) GetCacheEntry() ([]string, error) {
+func (w *RedisWriter) GetCacheEntry() (map[string]string, error) {
 	if !w.Check() {
 		return nil, &common.WriterError{Params: "", Prob: "redis connection test fail"}
 	}
 
-	results, err := w.RClient.SMembers(w.CacheQueueName).Result()
+	results, err := w.RClient.HGetAll(w.CacheQueueName).Result()
 	if err != nil {
 		return nil, &common.WriterError{Params: w.CacheQueueName, Prob: err.Error()}
 	}
@@ -108,8 +108,9 @@ func (w *RedisWriter) DumpEntry2File() error {
 	}
 	defer fd.Close()
 
-	for i := 0; i < len(results); i = i + 2 {
-		fd.WriteString(fmt.Sprintf("%s %s\n", results[i], results[i+1]))
+	for key, value := range results {
+		fd.WriteString(fmt.Sprintf("%s %s\n", key, value))
+
 	}
 
 	return nil

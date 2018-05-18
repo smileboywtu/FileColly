@@ -2,14 +2,17 @@
 
 //  4C 16G
 //  239 second
-//  file count: 500000  2092 f/s
-//  filesize: 20 Bytes
+//  file count: 10000  3000 f/s
+//  filesize: 1024 Bytes
 
-//	go test -v -bench=. ./colly -run=BenchmarkCollector_Start
 //	goos: linux
 //	goarch: amd64
 //	pkg: github.com/smileboywtu/FileColly/colly
-//  BenchmarkCollector_Start-8               	       1	239480616423 ns/op
+//	BenchmarkCollector_Start100-8            	       1	2504965409 ns/op
+//	BenchmarkCollector_Start300-8            	       1	3111993207 ns/op
+//	BenchmarkCollector_Start500-8            	       1	3622320302 ns/op
+//	BenchmarkCollector_Start1000-8           	       1	3786183160 ns/op
+
 
 package colly
 
@@ -17,7 +20,7 @@ import (
 	"testing"
 )
 
-func BenchmarkCollector_Start(b *testing.B) {
+func baseCollector_Start(workers int, directory string, b *testing.B) {
 	appOptions := &AppConfigOption{
 		RedisHost: "127.0.0.1",
 		RedisPort: 6379,
@@ -30,8 +33,8 @@ func BenchmarkCollector_Start(b *testing.B) {
 		DestinationRedisQueueLimit: 500000,
 
 		ReadWaitTime:     3,
-		SenderMaxWorkers: 500,
-		ReaderMaxWorkers: 500,
+		SenderMaxWorkers: workers,
+		ReaderMaxWorkers: workers,
 
 		FileMaxSize: "200M",
 
@@ -41,7 +44,7 @@ func BenchmarkCollector_Start(b *testing.B) {
 
 		LogFileName: "../hack/sender.log",
 
-		CollectDirectory: "../hack/test_data",
+		CollectDirectory: directory,
 	}
 
 	colly, errs := NewCollector(appOptions)
@@ -51,4 +54,20 @@ func BenchmarkCollector_Start(b *testing.B) {
 
 	colly.Start()
 
+}
+
+func BenchmarkCollector_Start100(b *testing.B) {
+	baseCollector_Start(100, "../hack/100", b)
+}
+
+func BenchmarkCollector_Start300(b *testing.B) {
+	baseCollector_Start(300, "../hack/300", b)
+}
+
+func BenchmarkCollector_Start500(b *testing.B) {
+	baseCollector_Start(500, "../hack/500", b)
+}
+
+func BenchmarkCollector_Start1000(b *testing.B) {
+	baseCollector_Start(1000, "../hack/1000", b)
 }

@@ -13,7 +13,7 @@ import (
 	"io/ioutil"
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
-	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/smileboywtu/FileColly/common"
 )
 
@@ -122,7 +122,7 @@ func (c *Collector) CountClear() {
 }
 
 // ListCacheFiles get current cache file from backend
-func (c *Collector) ListCacheFiles() []string {
+func (c *Collector) ListCacheFiles() map[string]string {
 	if result, err := c.BackendInst.GetCacheEntry(); err != nil {
 		return nil
 	} else {
@@ -160,8 +160,6 @@ func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeRe
 		copy(encoder.FileContent, data)
 		packBytes, err := encoder.Encode()
 		c.sendPoll(result, EncodeResult{item.FilePath, packBytes, err})
-
-		c.IncreaseFileCount(1)
 	}
 
 }
@@ -173,6 +171,8 @@ func (c *Collector) Start() {
 	fileItems, errc := c.FileWalkerInst.Walk()
 
 	c.CountClear()
+	c.IncreaseFileCount(int(c.BackendInst.GetDestQueueSize()))
+
 	// load cache entry from db
 	if c.AppConfigs.LoadCacheDB {
 		errs := c.BackendInst.LoadEntryFromDB()
@@ -219,11 +219,14 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult, cacheBuffer chan<- str
 	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
 		go func() {
 			for r := range buffers {
-				if !c.BackendInst.IsAllow() {
+
+				if c.FileCount > int64(c.AppConfigs.DestinationRedisQueueLimit) {
 					logger.Println("destination redis queue if full")
 					continue
 				}
+
 				if r.Err == nil {
+					c.IncreaseFileCount(1)
 					c.BackendInst.SendFileContent(r.EncodeContent)
 					logger.Println("send file: ", r.Path)
 					// send for cache

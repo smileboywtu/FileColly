@@ -73,11 +73,17 @@ go test -v -bench=. ./colly -run=BenchmarkCollector_Start
 goos: linux
 goarch: amd64
 pkg: github.com/smileboywtu/FileColly/colly
-BenchmarkCollector_Start-8               	       1	239480616423 ns/op
+BenchmarkCollector_Start100-8            	       1	2504965409 ns/op
+BenchmarkCollector_Start300-8            	       1	3111993207 ns/op
+BenchmarkCollector_Start500-8            	       1	3622320302 ns/op
+BenchmarkCollector_Start1000-8           	       1	3786183160 ns/op
 ```
+
+you should use benchmark test suit to find the suitable worker numbers.
 
 ## summary
 
-file count: 500000  2092 f/s
+filesize: 1024 Bytes
 
-filesize: 20 Bytes
+file count: 10000  3300 f/s
+
