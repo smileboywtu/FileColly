@@ -13,9 +13,10 @@ type CacheWriter interface {
 	GetDestQueueSize() int64
 	GetCacheEntry() ([]string, error)
 
-	CacheFileEntry(files []string) error
+	CacheFileEntry(filepath string, timestamp string) error
 	SendFileContent(buffer string) error
 	BatchSendFileContent(buffers []string) error
+	CacheFastLookup(filepath string) bool
 
 	RemoveCacheEntry(files []string) error
 	IsAllow() bool
@@ -83,6 +84,11 @@ func (w *RedisWriter) GetCacheEntry() (map[string]string, error) {
 	}
 
 	return results, nil
+}
+
+// CacheFastLookup check if file has been cached
+func (w *RedisWriter) CacheFastLookup(filepath string) bool {
+	return w.RClient.HExists(w.CacheQueueName, filepath).Val()
 }
 
 // RemoveCacheEntry delete cache file in records

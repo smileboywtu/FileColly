@@ -11,7 +11,9 @@ collect local file and send compress content to redis
 - high performance
 - configurable by yaml
 - command line flags
-- cache file support
+- cache file timeout support
+- collect file timeout support
+- queue limit support and checks
  
 # How to start
 
@@ -29,6 +31,11 @@ dep ensure
 ``` shell
 ./build.sh
 ```
+
+# Internal
+
+you should adjust the `read wait time` config to avoid uncomplete files.
+the collector will check if destination queue size true turns as need
 
 # About Benchmark
 

@@ -140,12 +140,22 @@ func (c *Collector) sendPoll(result chan<- EncodeResult, item EncodeResult) {
 }
 
 // encodeFlow encodes file content and send to backend
-func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeResult) {
+func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeResult, cacheBuffer chan<- string) {
 
 	for item := range fileItems {
 
 		if !c.GetMatch(item.FilePath) {
 			c.sendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
+			continue
+		}
+
+		// send to cache checkup
+		go func() {
+			cacheBuffer <- item.FilePath
+		}()
+
+		// file has been send do not cache again
+		if c.AppConfigs.ReserveFile && c.BackendInst.CacheFastLookup(item.FilePath) {
 			continue
 		}
 
@@ -181,10 +191,14 @@ func (c *Collector) Start() {
 		}
 	}
 
+	// start cache flow
+	cacheBuffer := c.cacheFlow()
+	defer close(cacheBuffer)
+
 	wg.Add(c.AppConfigs.ReaderMaxWorkers)
 	for i := 0; i < c.AppConfigs.ReaderMaxWorkers; i++ {
 		go func() {
-			c.encodeFlow(fileItems, buffers)
+			c.encodeFlow(fileItems, buffers, cacheBuffer)
 			wg.Done()
 		}()
 	}
@@ -193,11 +207,8 @@ func (c *Collector) Start() {
 		close(buffers)
 	}()
 
-	cacheBuffer := c.cacheFlow()
-	c.sendFlow(buffers, cacheBuffer)
-
-	// close the cache buffer
-	close(cacheBuffer)
+	// wait all buffer deal done
+	c.sendFlow(buffers)
 
 	if err := <-errc; err != nil {
 		fmt.Println(err.Error())
@@ -211,7 +222,7 @@ func (c *Collector) Start() {
 // sendFlow cache current file in pipeline and remove file from directory
 // if queue is out of limit size or reserve file is true, then do nothing
 // about the file
-func (c *Collector) sendFlow(buffers <-chan EncodeResult, cacheBuffer chan<- string) {
+func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 
 	var wg sync.WaitGroup
 	wg.Add(c.AppConfigs.SenderMaxWorkers)
@@ -221,16 +232,20 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult, cacheBuffer chan<- str
 			for r := range buffers {
 
 				if c.FileCount > int64(c.AppConfigs.DestinationRedisQueueLimit) {
-					logger.Println("destination redis queue if full")
-					continue
+					if c.FileCount-int64(c.AppConfigs.DestinationRedisQueueLimit) > 10 {
+						c.CountClear()
+						c.IncreaseFileCount(int(c.BackendInst.GetDestQueueSize()))
+					} else {
+						c.IncreaseFileCount(1)
+						logger.Println("destination redis queue if full")
+						continue
+					}
 				}
 
 				if r.Err == nil {
 					c.IncreaseFileCount(1)
 					c.BackendInst.SendFileContent(r.EncodeContent)
 					logger.Println("send file: ", r.Path)
-					// send for cache
-					cacheBuffer <- r.Path
 				}
 			}
 			wg.Done()
