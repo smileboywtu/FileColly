@@ -18,6 +18,7 @@ package colly
 
 import (
 	"testing"
+	"os"
 )
 
 func baseCollector_Start(workers int, directory string, b *testing.B) {
@@ -53,6 +54,10 @@ func baseCollector_Start(workers int, directory string, b *testing.B) {
 	}
 
 	colly.Start()
+
+	b.StopTimer()
+	os.Remove("dumpdb.txt")
+	b.StartTimer()
 
 }
 
