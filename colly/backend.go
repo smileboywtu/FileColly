@@ -6,7 +6,6 @@ import (
 
 	"github.com/coreos/bbolt"
 	"github.com/go-redis/redis"
-	"github.com/smileboywtu/FileColly/common"
 )
 
 type CacheWriter interface {
@@ -63,7 +62,7 @@ func NewRedisWriter(opts *redis.Options, destQName string, qLimit int) (*RedisWr
 
 	pong, err := client.Ping().Result()
 	if err != nil || pong != "PONG" {
-		return nil, &common.WriterError{Params: opts.Addr, Prob: "redis connection test fail"}
+		return nil, errors.New(fmt.Sprintf("redis connect error: %s, connect params: %s", err, opts))
 	}
 
 	return &RedisWriter{
@@ -165,10 +164,10 @@ func (w *RedisWriter) GetDestQueueSize() int64 {
 // SendFileContent send one file to redis
 func (w *RedisWriter) SendFileContent(buffer string) error {
 	if !w.Check() {
-		return &common.WriterError{Params: "", Prob: "redis connection error"}
+		return errors.New(fmt.Sprintf("send file to destination error"))
 	}
 	if !w.IsAllow() {
-		return &common.WriterError{Params: "", Prob: "redis queue size limit"}
+		return errors.New(fmt.Sprintf("destination queue reach the limit size(%d)", w.QueueSizeLimit))
 	}
 	w.Client.LPush(w.DestQueueName, buffer)
 	return nil
