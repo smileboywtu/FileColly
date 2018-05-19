@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/coreos/bbolt"
+  packages = ["."]
+  revision = "aa66506030b376f848667d84d2596faa8a7099ea"
+  version = "v1.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/corpix/uarand"
   packages = ["."]
@@ -15,7 +21,16 @@
 
 [[projects]]
   name = "github.com/go-redis/redis"
-  packages = [".","internal","internal/consistenthash","internal/hashtag","internal/pool","internal/proto","internal/singleflight","internal/util"]
+  packages = [
+    ".",
+    "internal",
+    "internal/consistenthash",
+    "internal/hashtag",
+    "internal/pool",
+    "internal/proto",
+    "internal/singleflight",
+    "internal/util"
+  ]
   revision = "877867d2845fbaf86798befe410b6ceb6f5c29a3"
   version = "v6.10.2"
 
@@ -70,7 +85,11 @@
 [[projects]]
   branch = "master"
   name = "github.com/yudai/hcl"
-  packages = [".","hcl","json"]
+  packages = [
+    ".",
+    "hcl",
+    "json"
+  ]
   revision = "5fa2393b3552119bf33a69adb1402a1160cba23d"
 
 [[projects]]
@@ -88,6 +107,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "912ac40d4027534282422b674b92047bd9fca57b3a2ac6db3629073daca7cd43"
+  inputs-digest = "ccc7f9f7e9bf25dc762e60cc83ef346f3e892ed31220f71bd852943c5e172fa9"
   solver-name = "gps-cdcl"
   solver-version = 1

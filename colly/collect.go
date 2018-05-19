@@ -26,7 +26,7 @@ type Collector struct {
 	AppConfigs *AppConfigOption
 
 	// Backend Redis Instance
-	BackendInst *RedisWriter
+	BackendInst *Backend
 
 	// File Walker Instance
 	FileWalkerInst *FileWalker
@@ -73,7 +73,7 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 		Password:   opts.RedisPW,
 		MaxRetries: 3,
 	}
-	backend, errs := NewRedisWriter(redisOpts, opts.CacheRedisQueueName, opts.DestinationRedisQueueName, opts.DestinationRedisQueueLimit)
+	backend, errs := NewBackend(redisOpts, opts.DestinationRedisQueueName, opts.DestinationRedisQueueLimit)
 	if backend == nil || errs != nil {
 		return nil, errs
 	}
@@ -121,15 +121,6 @@ func (c *Collector) CountClear() {
 	c.Unlock()
 }
 
-// ListCacheFiles get current cache file from backend
-func (c *Collector) ListCacheFiles() map[string]string {
-	if result, err := c.BackendInst.GetCacheEntry(); err != nil {
-		return nil
-	} else {
-		return result
-	}
-}
-
 // sendPoll send file to
 func (c *Collector) sendPoll(result chan<- EncodeResult, item EncodeResult) {
 	select {
@@ -155,7 +146,7 @@ func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeRe
 		}()
 
 		// file has been send do not cache again
-		if c.AppConfigs.ReserveFile && c.BackendInst.CacheFastLookup(item.FilePath) {
+		if c.AppConfigs.ReserveFile && c.BackendInst.Cacher.CacheFileLookup(item.FilePath) {
 			continue
 		}
 
@@ -181,15 +172,7 @@ func (c *Collector) Start() {
 	fileItems, errc := c.FileWalkerInst.Walk()
 
 	c.CountClear()
-	c.IncreaseFileCount(int(c.BackendInst.GetDestQueueSize()))
-
-	// load cache entry from db
-	if c.AppConfigs.LoadCacheDB {
-		errs := c.BackendInst.LoadEntryFromDB()
-		if errs != nil {
-			logger.Println("load cache to backend error: ", errs.Error())
-		}
-	}
+	c.IncreaseFileCount(int(c.BackendInst.Sender.GetDestQueueSize()))
 
 	// start cache flow
 	cacheBuffer := c.cacheFlow()
@@ -216,7 +199,6 @@ func (c *Collector) Start() {
 	}
 
 	logger.Printf("current time: %s, send file total: %d", time.Now().Format("2006-01-02T15:04:05"), c.FileCount)
-	c.BackendInst.DumpEntry2File()
 }
 
 // sendFlow cache current file in pipeline and remove file from directory
@@ -234,7 +216,7 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 				if c.FileCount > int64(c.AppConfigs.DestinationRedisQueueLimit) {
 					if c.FileCount-int64(c.AppConfigs.DestinationRedisQueueLimit) > 10 {
 						c.CountClear()
-						c.IncreaseFileCount(int(c.BackendInst.GetDestQueueSize()))
+						c.IncreaseFileCount(int(c.BackendInst.Sender.GetDestQueueSize()))
 					} else {
 						c.IncreaseFileCount(1)
 						logger.Println("destination redis queue if full")
@@ -244,7 +226,7 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 
 				if r.Err == nil {
 					c.IncreaseFileCount(1)
-					c.BackendInst.SendFileContent(r.EncodeContent)
+					c.BackendInst.Sender.SendFileContent(r.EncodeContent)
 					logger.Println("send file: ", r.Path)
 				}
 			}
@@ -272,11 +254,11 @@ func (c *Collector) cacheFlow() chan string {
 					os.Remove(path)
 				}
 
-				if timestamp, errs := c.BackendInst.CacheFileCheck(path); errs != nil {
-					c.BackendInst.CacheFileEntry(path, strconv.FormatInt(time.Now().Unix(), 10))
+				if timestamp, errs := c.BackendInst.Cacher.GetCacheEntry(path); errs != nil {
+					c.BackendInst.Cacher.CacheFileEntry(path, strconv.FormatInt(time.Now().Unix(), 10))
 				} else if before, _ := strconv.ParseInt(timestamp, 10, 64); before+int64(c.AppConfigs.FileCacheTimeout) <= time.Now().Unix() {
 					os.Remove(path)
-					c.BackendInst.RemoveCacheEntry(path)
+					c.BackendInst.Cacher.RemoveCacheEntry(path)
 				}
 			}
 			wg.Done()

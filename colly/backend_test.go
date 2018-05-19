@@ -8,6 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
+	"fmt"
 )
 
 var opts = &redis.Options{
@@ -15,11 +16,10 @@ var opts = &redis.Options{
 	DB:       0,
 	Password: "",
 }
-var CacheQueueName = "cache:queue"
 var DestQueueName = "cache:dest"
 
 func TestNewRedisWriter(t *testing.T) {
-	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
+	inst, errs := NewRedisWriter(opts, DestQueueName, 500)
 	if errs != nil {
 		t.Fatal(errs.Error())
 	}
@@ -31,90 +31,56 @@ func TestNewRedisWriter(t *testing.T) {
 	}
 }
 
-func TestRedisWriter_CacheFileEntry(t *testing.T) {
+func TestBoltCacher_CacheFileEntry(t *testing.T) {
 
-	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
+	cache, errs := NewFileCacheWriter("fscache.db")
 	if errs != nil {
-		t.Fatal(errs.Error())
+		t.Fatal(errors.New("create cacher fails"))
 	}
-
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	filepath := "/tmp/a.txt"
-	before, errs := inst.CacheFileCheck(filepath)
-	if errs == nil && before == "" {
-		t.Fatal(errors.New("redis library do not work as expected"))
+
+	errs = cache.CacheFileEntry(filepath, timestamp)
+	if errs != nil {
+		t.Fatal(errors.New(fmt.Sprintf("put cache file error: %s", errs)))
 	}
 
-	errs = inst.CacheFileEntry(filepath, timestamp)
+	before, errs := cache.GetCacheEntry(filepath)
 	if errs != nil {
-		t.Fatal(errs.Error())
-	}
-
-	before, errs = inst.CacheFileCheck(filepath)
-	if errs != nil {
-		t.Fatal(errs)
+		t.Fatal(errors.New(fmt.Sprintf("get cache file error: %s", errs)))
 	}
 
 	if before != timestamp {
-		t.Fatal(errors.New("timestamp not equal"))
+		t.Fatal(errors.New("cache file content error"))
 	}
 }
 
-//func TestRedisWriter_DumpEntry2File(t *testing.T) {
-//	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
-//	if errs != nil {
-//		t.Fatal(errs.Error())
-//	}
-//
-//	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-//	filepath := "/tmp/a.txt"
-//
-//	errs = inst.CacheFileEntry(filepath, timestamp)
-//	if errs != nil {
-//		t.Fatal(errs)
-//	}
-//
-//	errs = inst.DumpEntry2File()
-//	if errs != nil {
-//		t.Fatal(errs)
-//	}
-//
-//	// remove cache
-//	inst.RemoveCacheEntry(filepath)
-//	inst.LoadEntryFromDB()
-//
-//	os.Remove("dumpdb.txt")
-//	before, errs := inst.CacheFileCheck(filepath)
-//	if before != timestamp {
-//		t.Error(errors.New("dumps and loads DB from local file fails"))
-//	}
-//
-//}
-
-func TestRedisWriter_RemoveCacheEntry(t *testing.T) {
+func TestBoltCacher_RemoveCacheEntry(t *testing.T) {
 	cachetimeout := 2
-
-	inst, errs := NewRedisWriter(opts, CacheQueueName, DestQueueName, 500)
+	cache, errs := NewFileCacheWriter("fscache.db")
 	if errs != nil {
-		t.Fatal(errs.Error())
+		t.Fatal(errors.New("create cacher fails"))
 	}
 
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	filepath := "/tmp/a.txt"
 
-	inst.CacheFileEntry(filepath, timestamp)
+	errs = cache.CacheFileEntry(filepath, timestamp)
+	if errs != nil {
+		t.Fatal(errors.New(fmt.Sprintf("put cache file error: %s", errs)))
+	}
 
 	done := make(chan bool, 1)
 	time.AfterFunc(time.Duration(cachetimeout+1)*time.Second, func() {
-		timestampbefore, errs := inst.CacheFileCheck(filepath)
+		timestampbefore, errs := cache.GetCacheEntry(filepath)
 		if errs != nil {
 			t.Fatal(errors.New("cache file lost"))
 		}
 		if before, _ := strconv.ParseInt(timestampbefore, 10, 64); before+int64(cachetimeout) <= time.Now().Unix() {
-			inst.RemoveCacheEntry(filepath)
+			cache.RemoveCacheEntry(filepath)
 		}
 
-		if _, errs := inst.CacheFileCheck(filepath); errs == nil {
+		if _, errs := cache.GetCacheEntry(filepath); errs == nil {
 			t.Fatal(errors.New("cache file not remove after cache timeout"))
 		}
 
@@ -122,4 +88,37 @@ func TestRedisWriter_RemoveCacheEntry(t *testing.T) {
 	})
 
 	<-done
+}
+
+func BenchmarkBoltCacher_CacheFileEntry(b *testing.B) {
+	b.StopTimer()
+	cache, errs := NewFileCacheWriter("fscache.db")
+	if errs != nil {
+		b.Fatal(errors.New("create cacher fails"))
+	}
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	filepath := "/tmp/a.txt"
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		cache.CacheFileEntry(filepath, timestamp)
+	}
+}
+
+func BenchmarkBoltCacher_GetCacheEntry(b *testing.B) {
+	b.StopTimer()
+	cache, errs := NewFileCacheWriter("fscache.db")
+	if errs != nil {
+		b.Fatal(errors.New("create cacher fails"))
+	}
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	filepath := "/tmp/a.txt"
+	cache.CacheFileEntry(filepath, timestamp)
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		cache.GetCacheEntry(filepath)
+	}
 }

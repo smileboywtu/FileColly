@@ -28,7 +28,6 @@ func baseCollector_Start(workers int, directory string, b *testing.B) {
 		RedisDB:   0,
 		RedisPW:   "",
 
-		LoadCacheDB:                false,
 		CacheRedisQueueName:        "cache:queue:tmp",
 		DestinationRedisQueueName:  "cache:queue:dest",
 		DestinationRedisQueueLimit: 500000,
