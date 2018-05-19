@@ -1,11 +1,12 @@
 package colly
 
 import (
+	"fmt"
+	"errors"
+
 	"github.com/coreos/bbolt"
 	"github.com/go-redis/redis"
 	"github.com/smileboywtu/FileColly/common"
-	"errors"
-	"fmt"
 )
 
 type CacheWriter interface {

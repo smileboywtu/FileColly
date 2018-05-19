@@ -13,12 +13,11 @@
 //	BenchmarkCollector_Start500-8            	       1	3622320302 ns/op
 //	BenchmarkCollector_Start1000-8           	       1	3786183160 ns/op
 
-
 package colly
 
 import (
-	"testing"
 	"os"
+	"testing"
 )
 
 func baseCollector_Start(workers int, directory string, b *testing.B) {

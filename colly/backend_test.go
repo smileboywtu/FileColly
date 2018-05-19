@@ -2,13 +2,13 @@
 package colly
 
 import (
+	"fmt"
 	"time"
 	"testing"
 	"strconv"
 
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
-	"fmt"
 )
 
 var opts = &redis.Options{
