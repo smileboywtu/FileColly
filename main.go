@@ -44,7 +44,7 @@ func main() {
 			Name:   "config",
 			Value:  "config.yaml",
 			Usage:  "Config file path",
-			EnvVar: "CROC_CONFIG",
+			EnvVar: "COLLY_CONFIG",
 		},
 	)
 
