@@ -9,8 +9,7 @@ type AppConfigOption struct {
 	RedisDB   int    `yaml:"redis_db" flagName:"redisdb" flagSName:"rdb" flagDescribe:"Destination Cache Redis db" default:"0"`
 	RedisPW   string `yaml:"redis_passwd" flagName:"redispw" flagSName:"rpwd" flagDescribe:"Destination Cache Redis password" default:""`
 
-	CacheRedisQueueName        string `yaml:"cache_queue" flagName:"cqname" flagSName:"cq" flagDescribe:"Cache Redis Queue name" default:"nsfocus:paas:fileserver:cache"`
-	DestinationRedisQueueName  string `yaml:"dest_queue" flagName:"dqname" flagSName:"dq" flagDescribe:"Destination Redis Queue name" default:"nsfocus:paas:fileserver:files"`
+	DestinationRedisQueueName  string `yaml:"dest_queue" flagName:"dqname" flagSName:"dq" flagDescribe:"Destination Redis Queue name" default:"paas:fileserver:files"`
 	DestinationRedisQueueLimit int    `yaml:"dest_queue_limit" flagName:"dqlimit" flagSName:"dql" flagDescribe:"Destination Redis Queue size limit" default:"3000"`
 
 	// wait time in second before reading the file
@@ -32,5 +31,5 @@ type AppConfigOption struct {
 	LogFileName string `yaml:"log_file" flagName:"lfile" flagSName:"log" flagDescribe:"File to write log" default:"sender.log"`
 
 	// file watch directory
-	CollectDirectory string `yaml:"collect_directory" flagName:"cdir" flagSName:"d" flagDescribe:"File collect directory" default:"/opt/nsfocus/files"`
+	CollectDirectory string `yaml:"collect_directory" flagName:"cdir" flagSName:"d" flagDescribe:"File collect directory" default:"/opt/files"`
 }

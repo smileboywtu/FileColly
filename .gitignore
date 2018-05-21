@@ -8,6 +8,7 @@ hack/masterfile
 hack/sender.log
 hack/test_data/*
 colly/fscache.db
+config.yaml
 
 # Binaries for programs and plugins
 *.exe
