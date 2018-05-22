@@ -9,6 +9,7 @@ hack/sender.log
 hack/test_data/*
 colly/fscache.db
 config.yaml
+.goreleaser.yml
 
 # Binaries for programs and plugins
 *.exe
