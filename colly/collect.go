@@ -184,6 +184,7 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 	if backend == nil || errs != nil {
 		log.Fatal("redis connect error", errs)
 	}
+	defer backend.Client.Close()
 
 	c.CountClear()
 	c.IncreaseFileCount(int(backend.GetDestQueueSize()))
@@ -208,6 +209,8 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 				if r.Err == nil {
 					c.IncreaseFileCount(1)
 					backend.SendFileContent(r.EncodeContent)
+
+					os.Remove(r.Path)
 					logger.Println("send file: ", r.Path)
 				}
 			}

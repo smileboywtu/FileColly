@@ -4,13 +4,13 @@ import (
 	"os"
 	"os/signal"
 	"fmt"
-	"time"
 	"syscall"
 
 	"github.com/urfave/cli"
 	"github.com/yudai/gotty/pkg/homedir"
 	"github.com/smileboywtu/FileColly/common"
 	collector "github.com/smileboywtu/FileColly/colly"
+	"time"
 )
 
 var email string
