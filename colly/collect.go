@@ -7,14 +7,13 @@ import (
 	"log"
 	"fmt"
 	"sync"
-	"time"
-	"strconv"
 	"context"
 	"io/ioutil"
 	"github.com/pkg/errors"
 	"github.com/go-redis/redis"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/smileboywtu/FileColly/common"
+	"time"
 )
 
 var logger *log.Logger
@@ -23,10 +22,7 @@ type Collector struct {
 	sync.RWMutex
 
 	// App Configs
-	AppConfigs *AppConfigOption
-
-	// Backend Redis Instance
-	BackendInst *Backend
+	UserConfigs *AppConfigOption
 
 	// File Walker Instance
 	FileWalkerInst *FileWalker
@@ -66,18 +62,6 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 	// init logger
 	InitLogger(opts.LogFileName)
 
-	// init backend option
-	redisOpts := &redis.Options{
-		Addr:       fmt.Sprintf("%s:%d", opts.RedisHost, opts.RedisPort),
-		DB:         opts.RedisDB,
-		Password:   opts.RedisPW,
-		MaxRetries: 3,
-	}
-	backend, errs := NewBackend(redisOpts, opts.DestinationRedisQueueName, opts.DestinationRedisQueueLimit)
-	if backend == nil || errs != nil {
-		return nil, errs
-	}
-
 	rule := Rule{
 		FileSizeLimit:   common.HumanSize2Bytes(opts.FileMaxSize),
 		ReserveFile:     opts.ReserveFile,
@@ -86,8 +70,7 @@ func NewCollector(opts *AppConfigOption) (*Collector, error) {
 	}
 
 	return &Collector{
-		AppConfigs:     opts,
-		BackendInst:    backend,
+		UserConfigs:    opts,
 		FileWalkerInst: NewDirectoryWorker(opts.CollectDirectory, opts.ReaderMaxWorkers, rule, ctx),
 		FileCount:      0,
 		Rule:           rule,
@@ -131,22 +114,12 @@ func (c *Collector) sendPoll(result chan<- EncodeResult, item EncodeResult) {
 }
 
 // encodeFlow encodes file content and send to backend
-func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeResult, cacheBuffer chan<- string) {
+func (c *Collector) encodeFlow(fileItems <-chan FileItem, result chan<- EncodeResult) {
 
 	for item := range fileItems {
 
 		if !c.GetMatch(item.FilePath) {
 			c.sendPoll(result, EncodeResult{item.FilePath, "", errors.New("file not match")})
-			continue
-		}
-
-		// send to cache checkup
-		go func() {
-			cacheBuffer <- item.FilePath
-		}()
-
-		// file has been send do not cache again
-		if c.AppConfigs.ReserveFile && c.BackendInst.Cacher.CacheFileLookup(item.FilePath) {
 			continue
 		}
 
@@ -171,17 +144,10 @@ func (c *Collector) Start() {
 	buffers := make(chan EncodeResult)
 	fileItems, errc := c.FileWalkerInst.Walk()
 
-	c.CountClear()
-	c.IncreaseFileCount(int(c.BackendInst.Sender.GetDestQueueSize()))
-
-	// start cache flow
-	cacheBuffer := c.cacheFlow()
-	defer close(cacheBuffer)
-
-	wg.Add(c.AppConfigs.ReaderMaxWorkers)
-	for i := 0; i < c.AppConfigs.ReaderMaxWorkers; i++ {
+	wg.Add(c.UserConfigs.ReaderMaxWorkers)
+	for i := 0; i < c.UserConfigs.ReaderMaxWorkers; i++ {
 		go func() {
-			c.encodeFlow(fileItems, buffers, cacheBuffer)
+			c.encodeFlow(fileItems, buffers)
 			wg.Done()
 		}()
 	}
@@ -197,8 +163,6 @@ func (c *Collector) Start() {
 		fmt.Println(err.Error())
 		logger.Println(err.Error())
 	}
-
-	logger.Printf("current time: %s, send file total: %d", time.Now().Format("2006-01-02T15:04:05"), c.FileCount)
 }
 
 // sendFlow cache current file in pipeline and remove file from directory
@@ -206,17 +170,34 @@ func (c *Collector) Start() {
 // about the file
 func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 
-	var wg sync.WaitGroup
-	wg.Add(c.AppConfigs.SenderMaxWorkers)
+	redisOpts := &redis.Options{
+		Addr:       fmt.Sprintf("%s:%d", c.UserConfigs.RedisHost, c.UserConfigs.RedisPort),
+		DB:         c.UserConfigs.RedisDB,
+		Password:   c.UserConfigs.RedisPW,
+		MaxRetries: 3,
+	}
+	backend, errs := NewRedisWriter(
+		redisOpts,
+		c.UserConfigs.DestinationRedisQueueName,
+		c.UserConfigs.DestinationRedisQueueLimit)
 
-	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
+	if backend == nil || errs != nil {
+		log.Fatal("redis connect error", errs)
+	}
+
+	c.CountClear()
+	c.IncreaseFileCount(int(backend.GetDestQueueSize()))
+
+	var wg sync.WaitGroup
+	wg.Add(c.UserConfigs.SenderMaxWorkers)
+
+	for i := 0; i < c.UserConfigs.SenderMaxWorkers; i++ {
 		go func() {
 			for r := range buffers {
-
-				if c.FileCount > int64(c.AppConfigs.DestinationRedisQueueLimit) {
-					if c.FileCount-int64(c.AppConfigs.DestinationRedisQueueLimit) > 10 {
+				if c.FileCount > int64(c.UserConfigs.DestinationRedisQueueLimit) {
+					if c.FileCount-int64(c.UserConfigs.DestinationRedisQueueLimit) > 10 {
 						c.CountClear()
-						c.IncreaseFileCount(int(c.BackendInst.Sender.GetDestQueueSize()))
+						c.IncreaseFileCount(int(backend.GetDestQueueSize()))
 					} else {
 						c.IncreaseFileCount(1)
 						logger.Println("destination redis queue if full")
@@ -226,7 +207,7 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 
 				if r.Err == nil {
 					c.IncreaseFileCount(1)
-					c.BackendInst.Sender.SendFileContent(r.EncodeContent)
+					backend.SendFileContent(r.EncodeContent)
 					logger.Println("send file: ", r.Path)
 				}
 			}
@@ -235,41 +216,7 @@ func (c *Collector) sendFlow(buffers <-chan EncodeResult) {
 	}
 
 	wg.Wait()
-}
-
-// cacheFlow cache file entry in redis
-// if file reach the cache expire time then remove it
-func (c *Collector) cacheFlow() chan string {
-
-	cacheBuffer := make(chan string, 2)
-
-	var wg sync.WaitGroup
-	wg.Add(c.AppConfigs.SenderMaxWorkers)
-
-	for i := 0; i < c.AppConfigs.SenderMaxWorkers; i++ {
-		go func() {
-			for path := range cacheBuffer {
-
-				if !c.AppConfigs.ReserveFile {
-					os.Remove(path)
-				}
-
-				if timestamp, errs := c.BackendInst.Cacher.GetCacheEntry(path); errs != nil {
-					c.BackendInst.Cacher.CacheFileEntry(path, strconv.FormatInt(time.Now().Unix(), 10))
-				} else if before, _ := strconv.ParseInt(timestamp, 10, 64); before+int64(c.AppConfigs.FileCacheTimeout) <= time.Now().Unix() {
-					os.Remove(path)
-					c.BackendInst.Cacher.RemoveCacheEntry(path)
-				}
-			}
-			wg.Done()
-		}()
-	}
-
-	go func() {
-		wg.Wait()
-	}()
-
-	return cacheBuffer
+	logger.Printf("current time: %s, send file total: %d", time.Now().Format("2006-01-02T15:04:05"), c.FileCount)
 }
 
 // GetMatch traverse the filters and check if file should be send

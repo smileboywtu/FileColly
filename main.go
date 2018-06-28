@@ -1,11 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"time"
 	"os/signal"
+	"fmt"
+	"time"
 	"syscall"
+
 	"github.com/urfave/cli"
 	"github.com/yudai/gotty/pkg/homedir"
 	"github.com/smileboywtu/FileColly/common"

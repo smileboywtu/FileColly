@@ -4,10 +4,6 @@ redis_port: 6379
 redis_db: 0
 redis_passwd:
 
-cache_queue:
-cache_timeout: 3600
-reserve_file: true
-
 dest_queue:
 dest_queue_limit: 3000
 
