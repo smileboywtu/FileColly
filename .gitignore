@@ -6,7 +6,6 @@ help
 dumpdb.txt
 hack/masterfile
 hack/sender.log
-hack/test_data/*
 colly/fscache.db
 config.yaml
 
